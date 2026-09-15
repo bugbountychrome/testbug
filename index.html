@@ -1,47 +1,45 @@
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Permission Test</title>
-<style>
-  body { margin: 0; font-family: sans-serif; background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-  button { padding: 15px 30px; font-size: 18px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
-  #log { margin-top: 20px; font-size: 14px; color: #888; text-align: center; padding: 0 20px; }
-</style>
-</head>
-<body>
-<button onclick="askCam()">Request Camera</button>
-<button onclick="askMic()">Request Microphone</button>
-<button onclick="askBoth()">Request Both</button>
-<div id="log"></div>
+<title>Chrome Permission Test</title>
+
+<button onclick="requestCamera()">Request Camera</button>
+<button onclick="requestMicrophone()">Request Microphone</button>
+<button onclick="requestBoth()">Request Camera + Microphone</button>
+
+<pre id="result"></pre>
 
 <script>
-const log = document.getElementById('log');
+const result = document.getElementById("result");
 
-async function askCam() {
+async function request(constraints) {
+  result.textContent = "Requesting permission...";
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'CAMERA ALLOWED';
-  } catch (e) { log.textContent = 'camera: ' + e.name; }
+    const stream =
+      await navigator.mediaDevices.getUserMedia(constraints);
+
+    // The PoC does not continuously record.
+    // Immediately release the granted media devices.
+    stream.getTracks().forEach(track => track.stop());
+
+    result.textContent = "Permission granted";
+  } catch (e) {
+    result.textContent = e.name;
+  }
 }
 
-async function askMic() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'MICROPHONE ALLOWED';
-  } catch (e) { log.textContent = 'mic: ' + e.name; }
+function requestCamera() {
+  request({ video: true });
 }
 
-async function askBoth() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'BOTH ALLOWED';
-  } catch (e) { log.textContent = 'both: ' + e.name; }
+function requestMicrophone() {
+  request({ audio: true });
+}
+
+function requestBoth() {
+  request({
+    video: true,
+    audio: true
+  });
 }
 </script>
-</body>
-</html>
