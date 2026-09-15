@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permission Test</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+  button { padding: 15px 30px; font-size: 18px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
+  #log { margin-top: 20px; font-size: 14px; color: #888; text-align: center; padding: 0 20px; }
+
+  #alertBox {
+    display: none;
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    width: 85%; max-width: 360px;
+    background: #fff; color: #202124;
+    border-radius: 12px; padding: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    font-size: 15px; z-index: 10000;
+  }
+  #alertBox .msg { margin-bottom: 18px; }
+  #alertBox .btns { display: flex; justify-content: flex-end; gap: 8px; padding-right: 30px; }
+  #alertBox .btns button {
+    margin: 0; padding: 10px 22px; font-size: 15px;
+  }
+  #btnAllow { background: #1a73e8; color: #fff; }
+  #btnDeny  { background: transparent; color: #1a73e8; }
+</style>
+</head>
+<body>
+<button onclick="askCam()">Request Camera</button>
+<button onclick="askMic()">Request Microphone</button>
+<button onclick="askBoth()">Request Both</button>
+<div id="log"></div>
+
+<div id="alertBox">
+  <div class="msg" id="alertMsg">This is an alert message.</div>
+  <div class="btns">
+    <button id="btnDeny">Deny</button>
+    <button id="btnAllow">Allow</button>
+  </div>
+</div>
+
+<script>
+const log = document.getElementById('log');
+
+async function askCam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    stream.getTracks().forEach(t => t.stop());
+    log.textContent = 'CAMERA ALLOWED';
+  } catch (e) { log.textContent = 'camera: ' + e.name; }
+}
+
+async function askMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    log.textContent = 'MICROPHONE ALLOWED';
+  } catch (e) { log.textContent = 'mic: ' + e.name; }
+}
+
+async function askBoth() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    log.textContent = 'BOTH ALLOWED';
+  } catch (e) { log.textContent = 'both: ' + e.name; }
+}
+
+function showAlert(msg) {
+  document.getElementById('alertMsg').textContent = msg;
+  document.getElementById('alertBox').style.display = 'block';
+}
+
+document.getElementById('btnAllow').addEventListener('click', () => {
+  document.getElementById('alertBox').style.display = 'none';
+  askBoth();
+});
+document.getElementById('btnDeny').addEventListener('click', () => {
+  document.getElementById('alertBox').style.display = 'none';
+});
+</script>
+</body>
+</html>
