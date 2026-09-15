@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Origin A - Media Permission Test</title>
+
+<h2>Origin A</h2>
+
+<button onclick="testCamera()">Grant Camera on Origin A</button>
+<button onclick="testMicrophone()">Grant Microphone on Origin A</button>
+<button onclick="testBoth()">Grant Camera + Microphone on Origin A</button>
+
+<p id="status">Waiting...</p>
+
+<script>
+const WEBHOOK = "YOUR_WEBHOOK_URL";
+
+const status = document.getElementById("status");
+
+async function report(type, result, extra = {}) {
+  const data = {
+    origin: location.origin,
+    type,
+    result,
+    timestamp: new Date().toISOString(),
+    ...extra
+  };
+
+  try {
+    await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      mode: "cors",
+      keepalive: true
+    });
+  } catch (_) {
+    // Webhook failure does not affect the permission test.
+  }
+}
+
+async function request(constraints, type) {
+  status.textContent = "Requesting " + type + "...";
+
+  try {
+    const stream =
+      await navigator.mediaDevices.getUserMedia(constraints);
+
+    const tracks = stream.getTracks();
+
+    await report(type, "GRANTED", {
+      trackCount: tracks.length,
+      tracks: tracks.map(t => t.kind)
+    });
+
+    status.textContent =
+      "A: permission granted (" + tracks.map(t => t.kind).join(", ") + ")";
+
+    // Immediately stop the devices.
+    tracks.forEach(track => track.stop());
+
+  } catch (e) {
+    await report(type, "DENIED_OR_ERROR", {
+      error: e.name
+    });
+
+    status.textContent = "A: " + e.name;
+  }
+}
+
+function testCamera() {
+  request({ video: true }, "camera");
+}
+
+function testMicrophone() {
+  request({ audio: true }, "microphone");
+}
+
+function testBoth() {
+  request(
+    {
+      video: true,
+      audio: true
+    },
+    "camera+microphone"
+  );
+}
+      </script>
