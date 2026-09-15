@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Origin B - Cross-Origin Permission Test</title>
+
+<h2>Origin B</h2>
+
+<button onclick="testCamera()">Test Camera</button>
+<button onclick="testMicrophone()">Test Microphone</button>
+<button onclick="testBoth()">Test Camera + Microphone</button>
+
+<p id="status">Waiting...</p>
+
+<script>
+const WEBHOOK = "https://webhook.site/677a4428-fd32-4fe1-ad82-2a5c08834035";
+
+const status = document.getElementById("status");
+
+async function report(type, result, extra = {}) {
+  const data = {
+    origin: location.origin,
+    type,
+    result,
+    timestamp: new Date().toISOString(),
+    ...extra
+  };
+
+  try {
+    await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      mode: "cors",
+      keepalive: true
+    });
+  } catch (_) {}
+}
+
+async function request(constraints, type) {
+  status.textContent = "Requesting " + type + "...";
+
+  try {
+    const stream =
+      await navigator.mediaDevices.getUserMedia(constraints);
+
+    const tracks = stream.getTracks();
+
+    await report(type, "GRANTED", {
+      trackCount: tracks.length,
+      tracks: tracks.map(t => t.kind)
+    });
+
+    status.textContent =
+      "B: permission granted (" + tracks.map(t => t.kind).join(", ") + ")";
+
+    tracks.forEach(track => track.stop());
+
+  } catch (e) {
+    await report(type, "DENIED_OR_ERROR", {
+      error: e.name
+    });
+
+    status.textContent = "B: " + e.name;
+  }
+}
+
+function testCamera() {
+  request({ video: true }, "camera");
+}
+
+function testMicrophone() {
+  request({ audio: true }, "microphone");
+}
+
+function testBoth() {
+  request(
+    {
+      video: true,
+      audio: true
+    },
+    "camera+microphone"
+  );
+}
+</script>
