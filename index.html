@@ -1,17 +1,32 @@
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><title>tester</title></head>
-<body style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-  <button id="go" style="padding:16px 32px;font-size:18px">GO</button>
+<body>
+  <!-- Halaman 1 -->
+  <div id="p1" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+    <button id="go" style="padding:16px 32px;font-size:18px">GO</button>
+  </div>
+
+  <!-- Halaman 2: form generik -->
+  <div id="p2" style="display:none;min-height:100vh;font-family:Arial;text-align:center;padding-top:40px">
+    <h2>Sign in</h2>
+    <p id="msg" style="color:red"></p>
+    <form onsubmit="event.preventDefault(); document.getElementById('msg').textContent='DEMO ONLY — nothing was sent';">
+      <input placeholder="Email" style="padding:10px;width:240px"><br><br>
+      <input type="password" placeholder="Password" style="padding:10px;width:240px"><br><br>
+      <button style="padding:10px 24px">Next</button>
+    </form>
+  </div>
+
   <script>
     document.getElementById("go").onclick = function () {
-      // 1) freeze renderer sejenak (efek "hang parah")
+      // freeze renderer (efek hang)
       const s = performance.now();
       while (performance.now() - s < 3000) Math.sqrt(performance.now());
 
-      // 2) redirect ke target — omnibox pindah, demonstrasikan
-      //    stale-paint / omnibox desync di sini
-      location.href = "https://www.google.com";
+      // ganti konten — omnibox/state demonstrasi
+      document.getElementById("p1").style.display = "none";
+      document.getElementById("p2").style.display = "block";
     };
   </script>
 </body>
