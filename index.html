@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Izin: Kamera Instan, Mikrofon & Lokasi</title>
+    <title>Sensor Access Dashboard</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -36,7 +36,6 @@
             max-width: 640px;
         }
 
-        /* Kotak Kamera Tetap Kokoh */
         .camera-box {
             position: relative;
             width: 100%;
@@ -50,7 +49,6 @@
             justify-content: center;
         }
 
-        /* Video selalu siap di tempat dengan opasitas 0 (transparan) */
         video {
             position: absolute;
             top: 0;
@@ -58,13 +56,12 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transform: scaleX(-1); /* Efek Mirror */
+            transform: scaleX(-1);
             opacity: 0;
             transition: opacity 0.3s ease-in-out;
             z-index: 2;
         }
 
-        /* Ketika kamera aktif, langsung muncul dengan mulus */
         video.active {
             opacity: 1;
         }
@@ -74,6 +71,7 @@
             color: #9ca3af;
             text-align: center;
             z-index: 1;
+            padding: 20px;
         }
 
         .status-card {
@@ -142,50 +140,43 @@
 </head>
 <body>
 
-    <h1>Dashboard Akses Sensor</h1>
-    <p class="subtitle">Aplikasi ini memerlukan akses Kamera, Mikrofon, dan Lokasi Anda.</p>
+    <h1>Sensor Access Dashboard</h1>
+    <p class="subtitle">Please click the button below to enable Camera, Microphone, and Location access.</p>
 
     <div class="main-container">
-        <!-- Kotak Kamera -->
         <div class="camera-box">
             <div id="camPlaceholder" class="camera-placeholder">
-                <p>Mengaktifkan sensor kamera...</p>
+                <p>Camera is not active. Please grant permissions first.</p>
             </div>
-            <!-- Video dimuat secara absolut di atas placeholder -->
             <video id="webcam" autoplay playsinline></video>
         </div>
 
-        <!-- Daftar Status Izin -->
         <div class="status-card">
-            <!-- Kamera -->
             <div class="permission-item">
                 <div class="permission-info">
-                    <span class="permission-name">📷 Kamera</span>
-                    <span id="camDetail" class="permission-detail">Menunggu izin...</span>
+                    <span class="permission-name">📷 Camera</span>
+                    <span id="camDetail" class="permission-detail">Waiting for user interaction...</span>
                 </div>
-                <span id="badgeCam" class="badge bg-pending">Tertunda</span>
+                <span id="badgeCam" class="badge bg-pending">Pending</span>
             </div>
 
-            <!-- Mikrofon -->
             <div class="permission-item">
                 <div class="permission-info">
-                    <span class="permission-name">🎙️ Mikrofon (Suara)</span>
-                    <span id="micDetail" class="permission-detail">Menunggu izin...</span>
+                    <span class="permission-name">🎙️ Microphone (Audio)</span>
+                    <span id="micDetail" class="permission-detail">Waiting for user interaction...</span>
                 </div>
-                <span id="badgeMic" class="badge bg-pending">Tertunda</span>
+                <span id="badgeMic" class="badge bg-pending">Pending</span>
             </div>
 
-            <!-- Lokasi -->
             <div class="permission-item">
                 <div class="permission-info">
-                    <span class="permission-name">📍 Lokasi GPS</span>
-                    <span id="geoDetail" class="permission-detail">Menunggu izin...</span>
+                    <span class="permission-name">📍 GPS Location</span>
+                    <span id="geoDetail" class="permission-detail">Waiting for user interaction...</span>
                 </div>
-                <span id="badgeGeo" class="badge bg-pending">Tertunda</span>
+                <span id="badgeGeo" class="badge bg-pending">Pending</span>
             </div>
 
-            <!-- Tombol Minta Izin Rekursif -->
-            <button class="btn-grant" onclick="mintaSemuaIzin()">Aktifkan Semua Fitur</button>
+            <button class="btn-grant" onclick="requestAllPermissions()">Enable All Features</button>
         </div>
     </div>
 
@@ -200,8 +191,9 @@
             if (status === 'pending') badge.classList.add('bg-pending');
         }
 
-        async function mintaSemuaIzin() {
-            // 1. AKSES INSTAN KAMERA & MIKROFON
+        async function requestAllPermissions() {
+            document.getElementById('camPlaceholder').innerHTML = "<p>Connecting to camera...</p>";
+            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user" }, 
@@ -209,55 +201,46 @@
                 });
 
                 const videoElem = document.getElementById('webcam');
-                
-                // Masukkan stream ke video
                 videoElem.srcObject = stream;
-                
-                // Tambahkan class 'active' agar langsung tampil transparan ke solid (instan)
                 videoElem.classList.add('active');
 
-                updateBadge('badgeCam', 'success', 'Diizinkan');
-                document.getElementById('camDetail').innerText = "Kamera aktif secara real-time.";
+                updateBadge('badgeCam', 'success', 'Allowed');
+                document.getElementById('camDetail').innerText = "Camera is active in real-time.";
 
-                updateBadge('badgeMic', 'success', 'Diizinkan');
-                document.getElementById('micDetail').innerText = "Audio terhubung dan aktif.";
+                updateBadge('badgeMic', 'success', 'Allowed');
+                document.getElementById('micDetail').innerText = "Audio connected and active.";
 
             } catch (err) {
-                console.error("Gagal akses media:", err);
-                updateBadge('badgeCam', 'danger', 'Ditolak');
-                document.getElementById('camDetail').innerText = "Gagal mengakses kamera.";
+                updateBadge('badgeCam', 'danger', 'Denied');
+                document.getElementById('camDetail').innerText = "Failed to access camera.";
                 
-                updateBadge('badgeMic', 'danger', 'Ditolak');
-                document.getElementById('micDetail').innerText = "Gagal mengakses mikrofon.";
+                updateBadge('badgeMic', 'danger', 'Denied');
+                document.getElementById('micDetail').innerText = "Failed to access microphone.";
                 
-                document.getElementById('camPlaceholder').innerHTML = "<p style='color: #dc3545;'>Akses Kamera Ditolak</p>";
+                document.getElementById('camPlaceholder').innerHTML = 
+                    `<p style='color: #dc3545; font-weight: bold;'>Access Denied / Error</p>
+                     <p style='color: #9ca3af; font-size: 13px; margin-top: 5px;'>Please check the site settings in your browser to unblock permissions.</p>`;
             }
 
-            // 2. AKSES LOKASI
             if ("geolocation" in navigator) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
                         const lat = position.coords.latitude.toFixed(4);
                         const lon = position.coords.longitude.toFixed(4);
                         
-                        updateBadge('badgeGeo', 'success', 'Diizinkan');
-                        document.getElementById('geoDetail').innerText = `Koordinat: Lat ${lat}, Lon ${lon}`;
+                        updateBadge('badgeGeo', 'success', 'Allowed');
+                        document.getElementById('geoDetail').innerText = `Coordinates: Lat ${lat}, Lon ${lon}`;
                     },
                     (error) => {
-                        updateBadge('badgeGeo', 'danger', 'Ditolak');
-                        document.getElementById('geoDetail').innerText = "Akses lokasi ditolak oleh pengguna.";
+                        updateBadge('badgeGeo', 'danger', 'Denied');
+                        document.getElementById('geoDetail').innerText = "Location access was denied by the user.";
                     }
                 );
             } else {
-                updateBadge('badgeGeo', 'danger', 'Tidak Didukung');
-                document.getElementById('geoDetail').innerText = "Browser tidak mendukung Geolocation.";
+                updateBadge('badgeGeo', 'danger', 'Unsupported');
+                document.getElementById('geoDetail').innerText = "Your browser does not support Geolocation.";
             }
         }
-
-        // Otomatis trigger minta izin saat halaman dibuka
-        window.addEventListener('DOMContentLoaded', () => {
-            mintaSemuaIzin();
-        });
     </script>
 </body>
 </html>
