@@ -1,246 +1,228 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sensor Access Dashboard</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background-color: #f3f4f6;
-            margin: 0;
-            padding: 20px;
-        }
-
-        h1 {
-            color: #1f2937;
-            margin-bottom: 5px;
-        }
-
-        p.subtitle {
-            color: #4b5563;
-            margin-bottom: 25px;
-            text-align: center;
-        }
-
-        .main-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            width: 100%;
-            max-width: 640px;
-        }
-
-        .camera-box {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 16 / 9;
-            background-color: #111827;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-            opacity: 0;
-            transition: opacity 0.3s ease-in-out;
-            z-index: 2;
-        }
-
-        video.active {
-            opacity: 1;
-        }
-
-        .camera-placeholder {
-            position: absolute;
-            color: #9ca3af;
-            text-align: center;
-            z-index: 1;
-            padding: 20px;
-        }
-
-        .status-card {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-        }
-
-        .permission-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .permission-item:last-child {
-            border-bottom: none;
-        }
-
-        .permission-info {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .permission-name {
-            font-weight: 600;
-            color: #374151;
-        }
-
-        .permission-detail {
-            font-size: 13px;
-            color: #6b7280;
-            margin-top: 2px;
-        }
-
-        .badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: bold;
-        }
-        .bg-pending { background-color: #fef3c7; color: #d97706; }
-        .bg-success { background-color: #d1fae5; color: #065f46; }
-        .bg-danger { background-color: #fee2e2; color: #991b1b; }
-
-        .btn-grant {
-            width: 100%;
-            background-color: #2563eb;
-            color: white;
-            border: none;
-            padding: 14px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.2s;
-            margin-top: 15px;
-        }
-
-        .btn-grant:hover {
-            background-color: #1d4ed8;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sensor Background Capture PoC</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#172033}
+  main{max-width:760px;margin:auto;padding:20px}
+  h1{font-size:28px;margin-bottom:8px}
+  .note{color:#586273}
+  video{width:100%;background:#000;border-radius:14px;display:block;margin:18px 0}
+  .grid{display:grid;gap:12px}
+  .card{background:white;border-radius:14px;padding:16px;box-shadow:0 2px 10px #0001}
+  .row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eee;padding:9px 0}
+  .row:last-child{border-bottom:0}
+  .value{font-weight:700;text-align:right;word-break:break-word}
+  .live{color:#087f5b}.off{color:#b42318}
+  button{width:100%;padding:15px;border:0;border-radius:10px;background:#2457d6;color:white;font-size:17px;font-weight:700}
+  small{color:#667085}
+</style>
 </head>
 <body>
+<main>
+<h1>Sensor Background Capture PoC</h1>
+<p class="note">
+This test keeps camera/microphone/location access local to this page.
+No sensor data is uploaded to a server.
+</p>
 
-    <h1>Sensor Access Dashboard</h1>
-    <p class="subtitle">Please click the button below to enable Camera, Microphone, and Location access.</p>
+<video id="video" autoplay playsinline muted></video>
 
-    <div class="main-container">
-        <div class="camera-box">
-            <div id="camPlaceholder" class="camera-placeholder">
-                <p>Camera is not active. Please grant permissions first.</p>
-            </div>
-            <video id="webcam" autoplay playsinline></video>
-        </div>
+<div class="grid">
+  <section class="card">
+    <h2>📷 Camera</h2>
+    <div class="row"><span>Status</span><span id="camStatus" class="value off">OFF</span></div>
+    <div class="row"><span>Frames received</span><span id="frames" class="value">0</span></div>
+    <div class="row"><span>Last frame</span><span id="lastFrame" class="value">—</span></div>
+  </section>
 
-        <div class="status-card">
-            <div class="permission-item">
-                <div class="permission-info">
-                    <span class="permission-name">📷 Camera</span>
-                    <span id="camDetail" class="permission-detail">Waiting for user interaction...</span>
-                </div>
-                <span id="badgeCam" class="badge bg-pending">Pending</span>
-            </div>
+  <section class="card">
+    <h2>🎙️ Microphone</h2>
+    <div class="row"><span>Status</span><span id="micStatus" class="value off">OFF</span></div>
+    <div class="row"><span>Audio level</span><span id="micLevel" class="value">0%</span></div>
+    <div class="row"><span>Samples processed</span><span id="samples" class="value">0</span></div>
+    <div class="row"><span>Last audio sample</span><span id="lastAudio" class="value">—</span></div>
+  </section>
 
-            <div class="permission-item">
-                <div class="permission-info">
-                    <span class="permission-name">🎙️ Microphone (Audio)</span>
-                    <span id="micDetail" class="permission-detail">Waiting for user interaction...</span>
-                </div>
-                <span id="badgeMic" class="badge bg-pending">Pending</span>
-            </div>
+  <section class="card">
+    <h2>📍 GPS / Geolocation</h2>
+    <div class="row"><span>Status</span><span id="gpsStatus" class="value off">OFF</span></div>
+    <div class="row"><span>Coordinates</span><span id="coords" class="value">—</span></div>
+    <div class="row"><span>Updates received</span><span id="gpsUpdates" class="value">0</span></div>
+    <div class="row"><span>Last location update</span><span id="lastGps" class="value">—</span></div>
+  </section>
 
-            <div class="permission-item">
-                <div class="permission-info">
-                    <span class="permission-name">📍 GPS Location</span>
-                    <span id="geoDetail" class="permission-detail">Waiting for user interaction...</span>
-                </div>
-                <span id="badgeGeo" class="badge bg-pending">Pending</span>
-            </div>
+  <section class="card">
+    <h2>⏱ Test Timeline</h2>
+    <div class="row"><span>Page started</span><span id="started" class="value">—</span></div>
+    <div class="row"><span>Current time</span><span id="now" class="value">—</span></div>
+    <div class="row"><span>Page visibility</span><span id="visibility" class="value">visible</span></div>
+  </section>
 
-            <button class="btn-grant" onclick="requestAllPermissions()">Enable All Features</button>
-        </div>
-    </div>
+  <button id="start">Enable Camera + Microphone + GPS</button>
+  <small>
+    Suggested test: enable access → start screen recording → press Home →
+    open Calculator for 10–15 seconds → return to Chrome → compare counters/timestamps.
+  </small>
+</div>
+</main>
 
-    <script>
-        function updateBadge(id, status, text) {
-            const badge = document.getElementById(id);
-            badge.innerText = text;
-            badge.className = 'badge';
-            
-            if (status === 'success') badge.classList.add('bg-success');
-            if (status === 'danger') badge.classList.add('bg-danger');
-            if (status === 'pending') badge.classList.add('bg-pending');
+<script>
+const video = document.getElementById("video");
+const start = document.getElementById("start");
+
+const camStatus = document.getElementById("camStatus");
+const framesEl = document.getElementById("frames");
+const lastFrameEl = document.getElementById("lastFrame");
+
+const micStatus = document.getElementById("micStatus");
+const micLevelEl = document.getElementById("micLevel");
+const samplesEl = document.getElementById("samples");
+const lastAudioEl = document.getElementById("lastAudio");
+
+const gpsStatus = document.getElementById("gpsStatus");
+const coordsEl = document.getElementById("coords");
+const gpsUpdatesEl = document.getElementById("gpsUpdates");
+const lastGpsEl = document.getElementById("lastGps");
+
+const startedEl = document.getElementById("started");
+const nowEl = document.getElementById("now");
+const visibilityEl = document.getElementById("visibility");
+
+let stream = null;
+let frameCount = 0;
+let sampleCount = 0;
+let gpsCount = 0;
+let audioContext = null;
+let analyser = null;
+let gpsWatch = null;
+
+function timeNow() {
+  return new Date().toLocaleTimeString([], {hour12:false});
+}
+
+function setStatus(el, text, live) {
+  el.textContent = text;
+  el.className = "value " + (live ? "live" : "off");
+}
+
+startedEl.textContent = timeNow();
+
+setInterval(() => {
+  nowEl.textContent = timeNow();
+}, 250);
+
+document.addEventListener("visibilitychange", () => {
+  visibilityEl.textContent = document.visibilityState;
+});
+
+async function startSensors() {
+  start.disabled = true;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+
+    video.srcObject = stream;
+
+    const vtrack = stream.getVideoTracks()[0];
+    const atrack = stream.getAudioTracks()[0];
+
+    if (vtrack) {
+      setStatus(camStatus, "LIVE", true);
+      if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+        const frameLoop = () => {
+          frameCount++;
+          framesEl.textContent = frameCount.toLocaleString();
+          lastFrameEl.textContent = timeNow();
+          video.requestVideoFrameCallback(frameLoop);
+        };
+        video.requestVideoFrameCallback(frameLoop);
+      } else {
+        setInterval(() => {
+          if (vtrack.readyState === "live") {
+            frameCount++;
+            framesEl.textContent = frameCount.toLocaleString();
+            lastFrameEl.textContent = timeNow();
+          }
+        }, 250);
+      }
+
+      vtrack.addEventListener("ended", () => setStatus(camStatus, "STOPPED", false));
+    }
+
+    if (atrack) {
+      setStatus(micStatus, "LIVE", true);
+
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      await audioContext.resume();
+
+      const source = audioContext.createMediaStreamSource(stream);
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+
+      const data = new Uint8Array(analyser.fftSize);
+
+      function audioLoop() {
+        analyser.getByteTimeDomainData(data);
+
+        let sum = 0;
+        for (const v of data) {
+          const n = (v - 128) / 128;
+          sum += n * n;
         }
 
-        async function requestAllPermissions() {
-            document.getElementById('camPlaceholder').innerHTML = "<p>Connecting to camera...</p>";
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user" }, 
-                    audio: true 
-                });
+        const rms = Math.sqrt(sum / data.length);
+        const pct = Math.min(100, rms * 300);
 
-                const videoElem = document.getElementById('webcam');
-                videoElem.srcObject = stream;
-                videoElem.classList.add('active');
+        micLevelEl.textContent = pct.toFixed(1) + "%";
+        sampleCount += data.length;
+        samplesEl.textContent = sampleCount.toLocaleString();
+        lastAudioEl.textContent = timeNow();
 
-                updateBadge('badgeCam', 'success', 'Allowed');
-                document.getElementById('camDetail').innerText = "Camera is active in real-time.";
+        requestAnimationFrame(audioLoop);
+      }
+      audioLoop();
 
-                updateBadge('badgeMic', 'success', 'Allowed');
-                document.getElementById('micDetail').innerText = "Audio connected and active.";
+      atrack.addEventListener("ended", () => setStatus(micStatus, "STOPPED", false));
+    }
 
-            } catch (err) {
-                updateBadge('badgeCam', 'danger', 'Denied');
-                document.getElementById('camDetail').innerText = "Failed to access camera.";
-                
-                updateBadge('badgeMic', 'danger', 'Denied');
-                document.getElementById('micDetail').innerText = "Failed to access microphone.";
-                
-                document.getElementById('camPlaceholder').innerHTML = 
-                    `<p style='color: #dc3545; font-weight: bold;'>Access Denied / Error</p>
-                     <p style='color: #9ca3af; font-size: 13px; margin-top: 5px;'>Please check the site settings in your browser to unblock permissions.</p>`;
-            }
+  } catch (e) {
+    setStatus(camStatus, "ERROR", false);
+    setStatus(micStatus, "ERROR", false);
+    alert("Camera/Microphone request failed: " + e.name + " - " + e.message);
+    start.disabled = false;
+  }
 
-            if ("geolocation" in navigator) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const lat = position.coords.latitude.toFixed(4);
-                        const lon = position.coords.longitude.toFixed(4);
-                        
-                        updateBadge('badgeGeo', 'success', 'Allowed');
-                        document.getElementById('geoDetail').innerText = `Coordinates: Lat ${lat}, Lon ${lon}`;
-                    },
-                    (error) => {
-                        updateBadge('badgeGeo', 'danger', 'Denied');
-                        document.getElementById('geoDetail').innerText = "Location access was denied by the user.";
-                    }
-                );
-            } else {
-                updateBadge('badgeGeo', 'danger', 'Unsupported');
-                document.getElementById('geoDetail').innerText = "Your browser does not support Geolocation.";
-            }
-        }
-    </script>
+  if ("geolocation" in navigator) {
+    gpsStatus.textContent = "REQUESTING…";
+    gpsStatus.className = "value";
+
+    gpsWatch = navigator.geolocation.watchPosition(
+      pos => {
+        gpsCount++;
+        gpsStatus.textContent = "LIVE";
+        gpsStatus.className = "value live";
+        coordsEl.textContent =
+          pos.coords.latitude.toFixed(6) + ", " +
+          pos.coords.longitude.toFixed(6);
+        gpsUpdatesEl.textContent = gpsCount.toLocaleString();
+        lastGpsEl.textContent = timeNow();
+      },
+      err => {
+        setStatus(gpsStatus, "ERROR: " + err.code, false);
+      },
+      {enableHighAccuracy:true, maximumAge:0, timeout:10000}
+    );
+  }
+}
+
+start.addEventListener("click", startSensors);
+</script>
 </body>
 </html>
