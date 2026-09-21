@@ -3,97 +3,174 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Fullscreen + Folder Access (Android)</title>
+<title>Fullscreen + Folder — Multi API (Android)</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overscroll-behavior:none; }
   body {
     font-family:sans-serif; background:#111; color:#eee;
-    display:flex; flex-direction:column; align-items:center;
-    padding:24px 16px; gap:18px;
+    display:flex; flex-direction:column; padding:20px 14px; gap:14px;
   }
-  h1 { font-size:18px; text-align:center; }
-  #btnStart {
-    margin-top:30vh;
-    padding:22px 44px; font-size:20px; background:#2563eb; color:#fff;
-    border:none; border-radius:14px; cursor:pointer; width:90%;
+  h1 { font-size:17px; text-align:center; }
+  .cards { display:flex; flex-direction:column; gap:12px; }
+  .card {
+    background:#1e1e1e; border:1px solid #333; border-radius:12px; padding:14px;
+    display:flex; flex-direction:column; gap:8px;
   }
-  #btnStart:disabled { background:#444; }
-  #info { font-size:13px; color:#aaa; text-align:center; }
+  .card h2 { font-size:14px; color:#7dd3fc; }
+  .card p { font-size:12px; color:#999; }
+  .card button {
+    padding:14px; font-size:15px; background:#2563eb; color:#fff;
+    border:none; border-radius:10px; cursor:pointer;
+  }
+  .card button:disabled { background:#444; }
+  .status { font-size:12px; min-height:15px; }
+  .ok { color:#4ade80; } .err { color:#f87171; } .wait { color:#fbbf24; }
+  input[type=file] { display:none; }
   #output {
-    width:100%; flex-grow:1; overflow-y:auto;
-    background:#1a1a1a; border-radius:10px; padding:14px;
-    font-family:monospace; font-size:12px; border:1px solid #333;
-    display:none;
+    background:#1a1a1a; border-radius:10px; padding:12px; min-height:20vh;
+    max-height:35vh; overflow-y:auto; font-family:monospace; font-size:12px;
+    border:1px solid #333;
   }
   .dir { color:#7dd3fc; }
-  input[type=file] { display:none; }
 </style>
 </head>
 <body>
 
-<h1>1 Klik → Fullscreen → Pilih Folder</h1>
-<button id="btnStart">🚀 Mulai</button>
-<div id="info"></div>
-<input type="file" id="inpWk" webkitdirectory directory multiple>
+<h1>Klik tombol → Fullscreen → Dialog folder (1 klik)</h1>
+
+<div class="cards">
+
+  <div class="card">
+    <h2>1. File System Access API</h2>
+    <p>showDirectoryPicker() — Chrome Android 132+. Izin persisten, diingat antar kunjungan.</p>
+    <button id="btnFsa">Fullscreen + Pilih Folder</button>
+    <div class="status" id="stFsa"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. webkitdirectory Input</h2>
+    <p>Folder picker Android (SAF) — Chrome Android 147+. Tanpa izin tambahan.</p>
+    <button id="btnWk">Fullscreen + Pilih Folder</button>
+    <div class="status" id="stWk"></div>
+    <input type="file" id="inpWk" webkitdirectory directory multiple>
+  </div>
+
+  <div class="card">
+    <h2>3. Origin Private File System (OPFS)</h2>
+    <p>File system sandbox milik situs sendiri — TANPA dialog izin sama sekali, selalu diizinkan.</p>
+    <button id="btnOpfs">Fullscreen + Buat Folder Demo</button>
+    <div class="status" id="stOpfs"></div>
+  </div>
+
+  <div class="card">
+    <h2>4. Handle Persisten (IndexedDB)</h2>
+    <p>Buka ulang folder yang pernah diizinkan lewat Metode 1 — queryPermission, tanpa dialog kalau izin masih aktif.</p>
+    <button id="btnRestore">Fullscreen + Buka Tersimpan</button>
+    <div class="status" id="stRestore"></div>
+  </div>
+
+</div>
+
 <div id="output"></div>
 
 <script>
-const btn = document.getElementById('btnStart');
-const inp = document.getElementById('inpWk');
-const info = document.getElementById('info');
 const output = document.getElementById('output');
-const fsaSupported = 'showDirectoryPicker' in window;
+function log(msg, cls) {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  if (cls) d.className = cls;
+  output.appendChild(d);
+  output.scrollTop = output.scrollHeight;
+}
+function setStatus(id, msg, cls) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + (cls || '');
+}
 
-info.textContent = fsaSupported
-  ? 'Metode: File System Access API (izin diingat, klik berikutnya tanpa dialog)'
-  : 'Metode: webkitdirectory fallback (folder picker Android)';
+/* KUNCI: fullscreen TIDAK di-await, supya transient activation
+   tetap hidup untuk pemanggilan picker di baris berikutnya */
+async function goFullscreen() {
+  document.documentElement.requestFullscreen().catch(() => {});
+  if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(() => {});
+}
 
-btn.addEventListener('click', async () => {
-  /* TAHAP 1: fullscreen dulu */
+/* ============ 1. FSA ============ */
+document.getElementById('btnFsa').addEventListener('click', async () => {
+  goFullscreen(); // tanpa await — gesture masih hidup
   try {
-    await document.documentElement.requestFullscreen();
-    // Chrome Android: tambahan supaya layar tetap nyala di fullscreen
-    if ('wakeLock' in navigator) {
-      navigator.wakeLock.request('screen').catch(() => {});
-    }
+    setStatus('stFsa', 'Meminta folder...', 'wait');
+    const handle = await window.showDirectoryPicker();
+    await handle.requestPermission({ mode: 'readwrite' });
+    await idbSaveHandle(handle); // simpan untuk Metode 4
+    document.getElementById('btnFsa').disabled = true;
+    setStatus('stFsa', 'Akses OK: ' + handle.name, 'ok');
+    log('── [FSA] Folder: ' + handle.name, 'dir');
+    await walk(handle, '');
   } catch (e) {
-    info.textContent = 'Fullscreen ditolak, lanjut tanpa fullscreen...';
-  }
-
-  /* TAHAP 2: masih dalam gesture klik → dialog folder langsung muncul */
-  if (fsaSupported) {
-    try {
-      const handle = await window.showDirectoryPicker();
-      // izin persisten (Chrome 122+): minta sekali, diingat antar kunjungan
-      await handle.requestPermission({ mode: 'readwrite' });
-      btn.disabled = true;
-      showList();
-      log('── Folder: ' + handle.name, 'dir');
-      await walk(handle, '');
-    } catch (e) {
-      if (e.name === 'AbortError') info.textContent = 'Pemilihan dibatalkan';
-      else info.textContent = 'FSA gagal (' + e.message + '), pakai fallback...';
-      fallback();
-    }
-  } else {
-    fallback();
+    setStatus('stFsa', e.name === 'AbortError' ? 'Dibatalkan' : 'Gagal: ' + e.message, 'err');
   }
 });
 
-function fallback() {
-  // Android Chrome 147+ / WebView: folder picker Android (SAF)
-  inp.click();
-}
-
-inp.addEventListener('change', () => {
-  btn.disabled = true;
-  showList();
-  const files = [...inp.files];
+/* ============ 2. webkitdirectory ============ */
+const inpWk = document.getElementById('inpWk');
+document.getElementById('btnWk').addEventListener('click', () => {
+  goFullscreen();                    // tanpa await
+  inpWk.click();                     // langsung dalam gesture yang sama
+});
+inpWk.addEventListener('change', () => {
+  document.getElementById('btnWk').disabled = true;
+  const files = [...inpWk.files];
   const root = files[0]?.webkitRelativePath?.split('/')[0] || '(folder)';
-  log(`── Folder: ${root} — ${files.length} file`, 'dir');
+  setStatus('stWk', `${files.length} file dari "${root}"`, 'ok');
+  log(`── [webkitdirectory] Folder: ${root} — ${files.length} file`, 'dir');
   files.slice(0, 200).forEach(f => log('📄 ' + f.webkitRelativePath));
   if (files.length > 200) log(`... +${files.length - 200} file lainnya`);
+});
+
+/* ============ 3. OPFS (tanpa izin) ============ */
+document.getElementById('btnOpfs').addEventListener('click', async () => {
+  goFullscreen();
+  try {
+    const root = await navigator.storage.getDirectory();
+    // buat struktur folder + file demo
+    const dir = await root.getDirectoryHandle('demo-folder', { create: true });
+    const sub = await dir.getDirectoryHandle('sub', { create: true });
+    const fh = await sub.getFileHandle('contoh.txt', { create: true });
+    const w = await fh.createWritable();
+    await w.write('Halo dari OPFS — ' + new Date().toLocaleString());
+    await w.close();
+    document.getElementById('btnOpfs').disabled = true;
+    setStatus('stOpfs', 'Folder OPFS dibuat (tanpa izin)', 'ok');
+    log('── [OPFS] demo-folder/', 'dir');
+    log('  📁 sub/', 'dir');
+    log('    📄 contoh.txt');
+    // baca balik
+    const f = await fh.getFile();
+    log('    isi: "' + await f.text() + '"');
+  } catch (e) {
+    setStatus('stOpfs', 'Gagal: ' + e.message, 'err');
+  }
+});
+
+/* ============ 4. Restore handle ============ */
+document.getElementById('btnRestore').addEventListener('click', async () => {
+  goFullscreen();
+  const handle = await idbGetHandle();
+  if (!handle) { setStatus('stRestore', 'Belum ada folder tersimpan (pakai Metode 1 dulu)', 'err'); return; }
+  try {
+    // query dulu — kalau granted, TANPA dialog sama sekali
+    let perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') { setStatus('stRestore', 'Izin ditolak', 'err'); return; }
+    document.getElementById('btnRestore').disabled = true;
+    setStatus('stRestore', 'Restore: ' + handle.name + ' (izin: ' + perm + ')', 'ok');
+    log('── [Restore] Folder: ' + handle.name, 'dir');
+    await walk(handle, '');
+  } catch (e) {
+    setStatus('stRestore', 'Gagal: ' + e.message, 'err');
+  }
 });
 
 /* Rekursif FSA */
@@ -105,17 +182,28 @@ async function walk(dir, indent) {
   }
 }
 
-function showList() {
-  output.style.display = 'block';
-  output.innerHTML = '';
-  btn.textContent = '✅ Selesai';
+/* ============ IndexedDB ============ */
+function idbOpen() {
+  return new Promise(res => {
+    const req = indexedDB.open('folder-access-db', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('handles');
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => res(null);
+  });
 }
-function log(msg, cls) {
-  const d = document.createElement('div');
-  d.textContent = msg;
-  if (cls) d.className = cls;
-  output.appendChild(d);
-  output.scrollTop = output.scrollHeight;
+async function idbSaveHandle(handle) {
+  const db = await idbOpen();
+  if (!db) return;
+  db.transaction('handles', 'readwrite').objectStore('handles').put(handle, 'dir');
+}
+async function idbGetHandle() {
+  const db = await idbOpen();
+  if (!db) return null;
+  return new Promise(res => {
+    const req = db.transaction('handles', 'readonly').objectStore('handles').get('dir');
+    req.onsuccess = () => res(req.result || null);
+    req.onerror = () => res(null);
+  });
 }
 </script>
 
