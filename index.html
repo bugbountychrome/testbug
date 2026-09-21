@@ -3,87 +3,211 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fullscreen Folder Access</title>
+<title>Multi-API Folder Access</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin:0; padding:0; box-sizing:border-box; }
   body {
-    font-family: sans-serif;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: #111;
-    color: #eee;
-    gap: 20px;
+    font-family: sans-serif; height:100vh; padding:30px;
+    background:#111; color:#eee; display:flex; flex-direction:column; gap:24px;
   }
+  h1 { font-size:22px; }
+  .methods { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .card {
+    background:#1e1e1e; border-radius:10px; padding:18px;
+    display:flex; flex-direction:column; gap:10px; border:1px solid #333;
+  }
+  .card h2 { font-size:16px; color:#7dd3fc; }
+  .card p { font-size:13px; color:#aaa; flex-grow:1; }
   button {
-    padding: 14px 28px;
-    font-size: 18px;
-    background: #2563eb;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
+    padding:10px 16px; font-size:14px; background:#2563eb; color:#fff;
+    border:none; border-radius:6px; cursor:pointer;
   }
-  button:hover { background: #1d4ed8; }
-  #fileList {
-    width: 80%;
-    max-height: 50vh;
-    overflow-y: auto;
-    background: #1e1e1e;
-    border-radius: 8px;
-    padding: 16px;
-    display: none;
+  button:hover { background:#1d4ed8; }
+  button:disabled { background:#444; cursor:not-allowed; }
+  .status { font-size:12px; min-height:16px; color:#fbbf24; }
+  .ok { color:#4ade80 !important; }
+  .err { color:#f87171 !important; }
+  input[type=file] { display:none; }
+  #output {
+    background:#1a1a1a; border-radius:8px; padding:14px; height:30vh;
+    overflow-y:auto; font-family:monospace; font-size:13px; border:1px solid #333;
   }
-  .file { padding: 6px 0; border-bottom: 1px solid #333; font-size: 14px; }
 </style>
 </head>
 <body>
 
-<h1>Klik tombol untuk masuk Fullscreen</h1>
-<button id="fsBtn">Masuk Fullscreen</button>
-<div id="fileList"></div>
+<h1>Pilih metode akses folder — klik izin hanya 1x</h1>
+
+<div class="methods">
+
+  <!-- METODE 1: File System Access API -->
+  <div class="card">
+    <h2>1. File System Access API</h2>
+    <p>showDirectoryPicker() — Chromium modern. Handle disimpan ke IndexedDB, klik berikutnya tidak minta izin lagi.</p>
+    <button id="btnFsAccess">Pilih Folder (izin 1x)</button>
+    <div class="status" id="stFsAccess"></div>
+  </div>
+
+  <!-- METODE 2: webkitdirectory input -->
+  <div class="card">
+    <h2>2. webkitdirectory Input</h2>
+    <p>Fallback klasik (semua browser). File handle dari input bisa dibaca ulang tanpa izin tambahan.</p>
+    <button id="btnWebkit">Pilih Folder (izin 1x)</button>
+    <input type="file" id="inpWebkit" webkitdirectory multiple>
+    <div class="status" id="stWebkit"></div>
+  </div>
+
+  <!-- METODE 3: Drag & Drop -->
+  <div class="card">
+    <h2>3. Drag & Drop</h2>
+    <p>Tarik folder ke area ini. DataTransfer diberikan browser langsung, tanpa dialog izin.</p>
+    <button id="btnDrag">Aktifkan Area Drop</button>
+    <div id="dropZone" style="border:2px dashed #555; border-radius:8px; padding:14px; text-align:center; font-size:13px; display:none;">
+      Tarik folder ke sini
+    </div>
+    <div class="status" id="stDrag"></div>
+  </div>
+
+  <!-- METODE 4: Handle tersimpan -->
+  <div class="card">
+    <h2>4. Handle Tersimpan (IndexedDB)</h2>
+    <p>Buka kembali folder yang pernah diizinkan. Jika izin masih aktif → tanpa dialog; jika tidak → 1 klik untuk restore.</p>
+    <button id="btnRestore">Buka Folder Tersimpan</button>
+    <div class="status" id="stRestore"></div>
+  </div>
+
+</div>
+
+<div id="output"></div>
 
 <script>
-const fsBtn = document.getElementById('fsBtn');
-const fileList = document.getElementById('fileList');
-let dirHandle = null;
+/* ============ UTIL ============ */
+const output = document.getElementById('output');
+function log(msg, cls='') {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  if (cls) d.className = cls;
+  output.appendChild(d);
+  output.scrollTop = output.scrollHeight;
+}
+function setStatus(id, msg, cls='') {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + cls;
+}
 
-fsBtn.addEventListener('click', async () => {
+/* ============ METODE 1: File System Access API ============ */
+const btnFs = document.getElementById('btnFsAccess');
+btnFs.addEventListener('click', async () => {
   try {
-    // 1. Masuk fullscreen
-    await document.documentElement.requestFullscreen();
-
-    // 2. Minta akses folder (harus dipanggil dari gesture user, klik tombol ini)
-    dirHandle = await window.showDirectoryPicker();
-    await listFolder(dirHandle);
-  } catch (err) {
-    // user membatalkan picker atau fullscreen ditolak
-    console.warn(err);
-    if (err.name !== 'AbortError') alert('Gagal: ' + err.message);
+    setStatus('stFsAccess', 'Meminta akses folder...');
+    const handle = await window.showDirectoryPicker();
+    await idbSaveHandle(handle); // simpan untuk metode 4
+    btnFs.disabled = true;
+    setStatus('stFsAccess', 'Akses diberikan: ' + handle.name, 'ok');
+    log('── [FSA] Folder: ' + handle.name);
+    await walkFSA(handle, '', 'FSA');
+  } catch (e) {
+    if (e.name === 'AbortError') setStatus('stFsAccess', 'Dibatalkan user');
+    else setStatus('stFsAccess', 'Tidak didukung: ' + e.message, 'err');
   }
 });
 
-async function listFolder(handle, indent = '') {
-  fileList.style.display = 'block';
-  fileList.innerHTML = ''; // reset
-  await walk(handle, indent);
-}
-
-async function walk(dir, indent) {
+async function walkFSA(dir, indent, tag) {
   for await (const [name, entry] of dir.entries()) {
-    const div = document.createElement('div');
-    div.className = 'file';
-    div.textContent = indent + (entry.kind === 'directory' ? '📁 ' : '📄 ') + name;
-    fileList.appendChild(div);
-    if (entry.kind === 'directory') {
-      await walk(entry, indent + '  ');
-    }
+    log(`${indent}${entry.kind === 'directory' ? '📁' : '📄'} ${name} [${tag}]`);
+    if (entry.kind === 'directory') await walkFSA(entry, indent + '  ', tag);
   }
 }
 
-// Keluar fullscreen saat tekan ESC (otomatis oleh browser)
+/* ============ METODE 2: webkitdirectory ============ */
+const btnWk = document.getElementById('btnWebkit');
+const inpWk = document.getElementById('inpWebkit');
+btnWk.addEventListener('click', () => inpWk.click());
+inpWk.addEventListener('change', () => {
+  btnWk.disabled = true;
+  const files = [...inpWk.files];
+  const root = files[0]?.webkitRelativePath?.split('/')[0] || '(folder)';
+  setStatus('stWebkit', `${files.length} file dari "${root}"`, 'ok');
+  log(`── [webkitdirectory] Folder: ${root} (${files.length} file)`);
+  files.slice(0, 100).forEach(f => log('📄 ' + f.webkitRelativePath));
+  if (files.length > 100) log(`... dan ${files.length - 100} file lainnya`);
+});
+
+/* ============ METODE 3: Drag & Drop ============ */
+const btnDrag = document.getElementById('btnDrag');
+const dropZone = document.getElementById('dropZone');
+btnDrag.addEventListener('click', () => {
+  dropZone.style.display = 'block';
+  btnDrag.disabled = true;
+  setStatus('stDrag', 'Area drop aktif, tarik folder ke sini', 'ok');
+});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = '#2a2a2a'; });
+dropZone.addEventListener('dragleave', () => dropZone.style.background = 'transparent');
+dropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropZone.style.background = 'transparent';
+  const items = [...e.dataTransfer.items];
+  const entries = items.map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+  if (!entries.length) { setStatus('stDrag', 'Tidak ada folder terdeteksi', 'err'); return; }
+  setStatus('stDrag', `${entries.length} item diterima`, 'ok');
+  for (const entry of entries) await walkEntry(entry, '', 'Drop');
+});
+
+async function walkEntry(entry, indent, tag) {
+  log(`${indent}${entry.isFile ? '📄' : '📁'} ${entry.name} [${tag}]`);
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise(res => reader.readEntries(res, () => res([])));
+      for (const child of batch) await walkEntry(child, indent + '  ', tag);
+    } while (batch.length > 0);
+  }
+}
+
+/* ============ METODE 4: Restore dari IndexedDB ============ */
+const btnRestore = document.getElementById('btnRestore');
+btnRestore.addEventListener('click', async () => {
+  const handle = await idbGetHandle();
+  if (!handle) { setStatus('stRestore', 'Belum ada folder tersimpan (pilih dulu lewat Metode 1)', 'err'); return; }
+  try {
+    // Cek izin tanpa dialog dulu; kalau perlu, 1 klik = prompt
+    let perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') { setStatus('stRestore', 'Izin ditolak', 'err'); return; }
+    btnRestore.disabled = true;
+    setStatus('stRestore', 'Akses restore: ' + handle.name, 'ok');
+    log('── [Restore] Folder: ' + handle.name);
+    await walkFSA(handle, '', 'Restore');
+  } catch (e) {
+    setStatus('stRestore', 'Gagal: ' + e.message, 'err');
+  }
+});
+
+/* ============ IndexedDB sederhana ============ */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('folder-access-db', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('handles');
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => res(req.error);
+  });
+}
+async function idbSaveHandle(handle) {
+  const db = await idbOpen();
+  const tx = db.transaction('handles', 'readwrite');
+  tx.objectStore('handles').put(handle, 'dir');
+}
+async function idbGetHandle() {
+  const db = await idbOpen();
+  return new Promise(res => {
+    const tx = db.transaction('handles', 'readonly');
+    const req = tx.objectStore('handles').get('dir');
+    req.onsuccess = () => res(req.result || null);
+    req.onerror = () => res(null);
+  });
+}
 </script>
 
 </body>
