@@ -1,16 +1,28 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
+    html, body {
+        margin: 0;
+        height: 100%;
+    }
+
     h1 {
         margin: 1em;
     }
 
+    /* Overlay menutupi seluruh viewport, termasuk saat fullscreen */
     a {
-        position: absolute;
+        position: fixed;
         top: 0;
         left: 0;
-        right: 0;
-        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 9999;
+        -webkit-tap-highlight-color: transparent;
     }
 
     input {
@@ -21,8 +33,10 @@
         width: 100%;
     }
 </style>
+</head>
+<body>
 
-<h1>Tap to upload photo to Google accounts</h1>
+<h1>Tap to upload photo</h1>
 
 <!-- [poc-with-system-dialog]: -->
 <input id="fileSelect" type="file" accept="image/*" />
@@ -31,14 +45,23 @@
 <!-- <input id="fileSelect" type="file" accept="*/*" /> -->
 
 <img id="img">
-<a id="link" href="https://login-accounts.google.com" target="_blank"></a>
+
+<!-- href="#self" + preventDefault: tetap di halaman ini, TIDAK navigasi.
+     Overlay pakai position:fixed 100vw×100vh → full layar -->
+<a id="link" href="#"></a>
 
 <script>
-    link.onclick = () => {
-        fileSelect.click();
-    }
+    link.onclick = (e) => {
+        e.preventDefault();      // ← kunci: cegah navigasi/hash-jump
+        fileSelect.click();      // picker dipanggil dalam gesture yang sama
+    };
 
     fileSelect.onchange = (event) => {
         img.src = URL.createObjectURL(fileSelect.files[0]);
-    }
+        // opsional: kembali ke fullscreen setelah file dipilih
+        // document.documentElement.requestFullscreen().catch(() => {});
+    };
 </script>
+
+</body>
+</html>
