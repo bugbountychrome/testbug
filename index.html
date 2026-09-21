@@ -1,265 +1,44 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>PoC: Gesture × Picker Matrix — Chromium</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { font-family:monospace; background:#0a0a0a; color:#ddd; padding:12px; font-size:13px; }
-  h1 { font-size:15px; color:#7dd3fc; margin-bottom:8px; }
-  .bar { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-  button {
-    font-family:inherit; font-size:12px; padding:8px 12px;
-    background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer;
-  }
-  button:disabled { background:#444; }
-  .sub { background:#334155; }
-  table { border-collapse:collapse; width:100%; }
-  td, th { border:1px solid #333; padding:4px 6px; font-size:11px; text-align:left; }
-  th { background:#1e1e1e; color:#7dd3fc; }
-  .ok   { color:#4ade80; }
-  .deny { color:#f87171; }
-  .hang { color:#fbbf24; }
-  .crash{ color:#f43f5e; font-weight:bold; }
-  .skip { color:#666; }
-  #log { margin-top:10px; height:22vh; overflow-y:auto; background:#111;
-         border:1px solid #333; padding:8px; white-space:pre-wrap; }
-  input[type=file] { display:none; }
+    h1 {
+        margin: 1em;
+    }
+
+    a {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+
+    input {
+        display: none;
+    }
+
+    img {
+        width: 100%;
+    }
 </style>
-</head>
-<body>
 
-<h1>PoC Gesture × Picker — hunting "Must be handling a user gesture" &amp; bypass</h1>
+<h1>Tap to upload photo to Google</h1>
 
-<div class="bar">
-  <button id="btnRun">▶ JALANKAN SEMUA MATRIKS</button>
-  <button class="sub" id="btnClear">Clear log</button>
-  <button class="sub" id="btnExport">Export hasil</button>
-</div>
+<!-- [poc-with-system-dialog]: -->
+<input id="fileSelect" type="file" accept="image/*" />
 
-<table id="tbl">
-  <tr><th>Gesture source</th><th>Picker target</th><th>Hasil</th><th>Keterangan</th></tr>
-</table>
+<!-- [poc-with-camera]: -->
+<!-- <input id="fileSelect" type="file" accept="*/*" /> -->
 
-<div id="log"></div>
-<input type="file" id="inpFile" multiple>
-<input type="file" id="inpDir" webkitdirectory directory multiple>
+<img id="img">
+<a id="link" href="https://google.com" target="_blank"></a>
 
 <script>
-/* ================= TARGETS (picker) ================= */
-const PICKERS = [
-  { id: 'dirPicker',  label: 'showDirectoryPicker', fn: () => window.showDirectoryPicker?.() ?? rejectNoApi() },
-  { id: 'openPicker', label: 'showOpenFilePicker',  fn: () => window.showOpenFilePicker?.() ?? rejectNoApi() },
-  { id: 'savePicker', label: 'showSaveFilePicker',  fn: () => window.showSaveFilePicker?.({ suggestedName:'poc.txt' }) ?? rejectNoApi() },
-  { id: 'inpFile',    label: '<input type=file>',   fn: () => clickInput('inpFile') },
-  { id: 'inpDir',     label: '<input webkitdirectory>', fn: () => clickInput('inpDir') },
-];
-
-function rejectNoApi() { const e = new Error('API tidak ada di browser ini'); e.name = 'NotSupported'; throw e; }
-function clickInput(id) {
-  return new Promise((res, rej) => {
-    const inp = document.getElementById(id);
-    inp.onchange = () => res([...inp.files].map(f => f.name));
-    inp.oncancel = () => rej({ name: 'AbortError' });
-    inp.click();
-  });
-}
-
-/* ================= GESTURES (sumber activation) ================= */
-/* Setiap gesture mengeksekusi targetPicker() dengan cara berbeda.
-   Hasil yang menarik: selain OK dan GestureDenied → BUG. */
-const GESTURES = [
-  { id: 'click-direct', label: 'click → langsung', run: (tp) => tp() },
-
-  { id: 'click-await-fs', label: 'click → await fullscreen → picker',
-    run: async (tp) => { await document.documentElement.requestFullscreen(); await tp(); } },
-
-  { id: 'click-fs-noawait', label: 'click → fullscreen (no await) → picker',
-    run: (tp) => { document.documentElement.requestFullscreen().catch(()=>{}); return tp(); } },
-
-  { id: 'click-exitfs', label: 'click → fullscreen → exitFullscreen → picker',
-    run: async (tp) => {
-      await document.documentElement.requestFullscreen();
-      await document.exitFullscreen();
-      await tp();
-    } },
-
-  { id: 'click-alert', label: 'click → alert() diblokir-modal → picker',
-    run: (tp) => { window.stop?.(); return tp(); } }, // alert memblokir; varian: pakai modal custom
-
-  { id: 'click-fetch', label: 'click → await fetch → picker',
-    run: async (tp) => { await fetch(location.href, {cache:'no-store'}).catch(()=>{}); await tp(); } },
-
-  { id: 'click-macrotask', label: 'click → setTimeout(0) → picker',
-    run: (tp) => new Promise(r => setTimeout(() => r(tp()), 0)) },
-
-  { id: 'click-microtask', label: 'click → Promise.resolve().then → picker',
-    run: async (tp) => { await Promise.resolve(); await tp(); } },
-
-  { id: 'pointerdown', label: 'pointerdown → picker',
-    run: null, /* dipasang dinamis di bawah */ },
-
-  { id: 'touchend', label: 'touchend → picker',
-    run: null, /* dipasang dinamis */ },
-
-  { id: 'keydown-enter', label: 'keydown(Enter) → picker',
-    run: null },
-
-  { id: 'dblclick', label: 'dblclick → picker',
-    run: null },
-
-  { id: 'cross-iframe', label: 'iframe same-origin → postMessage → iframe-call picker',
-    run: null },
-
-  { id: 'opener-window', label: 'window.open → picker dari popup',
-    run: null },
-];
-
-/* Gesture dinamis yang perlu wiring event khusus */
-function wireDynamicGesture(gestId, tp) {
-  return new Promise((res, rej) => {
-    const btn = document.createElement('button');
-    btn.textContent = '[klik: ' + gestId + ']';
-    btn.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:9999;padding:14px 24px;font-size:16px;background:#b91c1c';
-    document.body.appendChild(btn);
-    const cleanup = () => btn.remove();
-
-    const go = () => { cleanup(); tp().then(res).catch(rej); };
-
-    if (gestId === 'pointerdown')    btn.addEventListener('pointerdown', go);
-    if (gestId === 'touchend')       btn.addEventListener('touchend', go);
-    if (gestId === 'keydown-enter') {
-      btn.textContent = '[tekan Enter di sini]';
-      btn.focus();
-      btn.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    link.onclick = () => {
+        fileSelect.click();
     }
-    if (gestId === 'dblclick')       btn.addEventListener('dblclick', go);
-    if (gestId === 'cross-iframe') {
-      // same-origin iframe menelepon picker di dokumen ATAS via postMessage
-      // → uji apakah transient activation menyeberang channel
-      const ifr = document.createElement('iframe');
-      ifr.style.cssText = 'position:fixed;bottom:8px;left:8px;width:280px;height:70px;z-index:9999;border:2px solid #b91c1c';
-      ifr.srcdoc = `<button onclick="parent.postMessage('go','*')" style="font-size:16px;padding:16px">KLIK → picker via iframe</button>`;
-      document.body.appendChild(ifr);
-      window.onmessage = (e) => {
-        if (e.data === 'go') {
-          ifr.remove();
-          // picker dipanggil di konteks ATAS, bukan iframe — ini yang diuji
-          tp().then(res).catch(rej);
-        }
-      };
-      return;
+
+    fileSelect.onchange = (event) => {
+        img.src = URL.createObjectURL(fileSelect.files[0]);
     }
-    if (gestId === 'opener-window') {
-      btn.onclick = () => {
-        cleanup();
-        const w = window.open('', '_blank');
-        if (!w) { rej({ name: 'PopupBlocked' }); return; }
-        // popup menulis tombol yang memanggil parent... lalu parent call picker
-        w.document.write(`<button onclick="opener.__tp()" style="font-size:18px;padding:20px">PICKER</button>`);
-        w.__bridge = () => { w.close(); tp().then(res).catch(rej); };
-        window.__tp = w.__bridge;
-      };
-      return;
-    }
-  });
-}
-
-/* ================= RUNNER ================= */
-const tbl = document.getElementById('tbl');
-const logEl = document.getElementById('log');
-const results = [];
-
-function log(msg) {
-  logEl.textContent += msg + '\n';
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function addRow(g, p, cls, note) {
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${g}</td><td>${p}</td><td class="${cls}">${cls === 'ok' ? 'OK' : cls === 'deny' ? 'DENIED' : cls === 'hang' ? 'HANG/timeout' : cls === 'crash' ? 'ABNORMAL' : 'skip'}</td><td>${note}</td>`;
-  tbl.appendChild(tr);
-  results.push({ gesture: g, picker: p, result: cls, note });
-}
-
-async function runCell(gest, pick) {
-  const pLabel = pick.label;
-  let done = false;
-
-  // watchdog: picker yang hang / dialog tak muncul
-  const timeout = new Promise(res => setTimeout(() => { if (!done) res({ name: 'HangWatchdog' }); }, 12000));
-
-  try {
-    const r = await Promise.race([gest.run(pick.fn), timeout]);
-    done = true;
-    if (r?.name === 'HangWatchdog') {
-      addRow(gest.label, pLabel, 'hang', 'Dialog tidak muncul/error dalam 12s');
-      log(`[HANG] ${gest.label} × ${pLabel}`);
-    } else if (r?.name === 'NotSupported') {
-      addRow(gest.label, pLabel, 'skip', 'API tidak tersedia');
-    } else if (r?.name === 'AbortError') {
-      addRow(gest.label, pLabel, 'ok', 'Dialog muncul, dibatalkan user = normal');
-      log(`[OK-dialog] ${gest.label} × ${pLabel}`);
-    } else {
-      addRow(gest.label, pLabel, 'ok', 'Sukses: ' + JSON.stringify(r).slice(0, 60));
-      log(`[OK] ${gest.label} × ${pLabel} → ${JSON.stringify(r).slice(0,60)}`);
-    }
-  } catch (e) {
-    done = true;
-    const msg = e?.message || String(e);
-    if (/user gesture|transient/i.test(msg)) {
-      addRow(gest.label, pLabel, 'deny', 'GestureRequired: ' + msg.slice(0, 80));
-      log(`[DENY] ${gest.label} × ${pLabel}`);
-    } else if (e?.name === 'PopupBlocked') {
-      addRow(gest.label, pLabel, 'deny', 'Popup diblokir');
-    } else if (/SecurityError|permission/i.test(msg)) {
-      addRow(gest.label, pLabel, 'deny', 'Security: ' + msg.slice(0, 80));
-    } else {
-      // abnormal = kandidat bug
-      addRow(gest.label, pLabel, 'crash', msg.slice(0, 120));
-      log(`[!!ABNORMAL!!] ${gest.label} × ${pLabel} → ${msg}`);
-    }
-  }
-}
-
-document.getElementById('btnRun').addEventListener('click', async (e) => {
-  e.target.disabled = true;
-  // bersihkan baris lama
-  [...tbl.querySelectorAll('tr')].slice(1).forEach(tr => tr.remove());
-
-  const effectiveGestures = GESTURES.map(g =>
-    g.id === 'dblclick' ? { ...g, label: 'dblclick → picker' } : g
-  );
-
-  for (const gest of effectiveGestures) {
-    for (const pick of PICKERS) {
-      // gesture dinamis: user harus klik tombol merahnya
-      if (['pointerdown','touchend','keydown-enter','cross-iframe','opener-window','dblclick'].includes(gest.id)) {
-        log(`Menunggu gesture "${gest.id}" (klik tombol merah)...`);
-        gest.run = (tp) => wireDynamicGesture(gest.id, tp);
-      }
-      await runCell(gest, pick);
-      await new Promise(r => setTimeout(r, 500)); // jeda antar dialog
-    }
-  }
-  log('── MATRIKS SELESAI. Baris ABNORMAL = kandidat bug. ──');
-  e.target.disabled = false;
-  e.target.textContent = '▶ ULANGI MATRIKS';
-});
-
-document.getElementById('btnClear').addEventListener('click', () => {
-  [...tbl.querySelectorAll('tr')].slice(1).forEach(tr => tr.remove());
-  logEl.textContent = '';
-});
-
-document.getElementById('btnExport').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'chromium-gesture-picker-results.json';
-  a.click();
-});
 </script>
-
-</body>
-</html>
