@@ -1,14 +1,58 @@
 <!doctype html>
 <html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Edge External Protocol Boundary Test</title>
+</head>
+
 <body>
+  <h2>External Protocol Boundary Test</h2>
 
-<h2>Edge Origin Isolation Test</h2>
+  <button onclick="topLevel()">
+    1. TOP-LEVEL MAILTO
+  </button>
 
-<iframe
-  src="https://glistening-kheer-13425c.netlify.app/"
-  allow="microphone"
-  style="width:100%;height:300px;border:1px solid black">
-</iframe>
+  <br><br>
 
+  <button onclick="sandboxed()">
+    2. SANDBOXED IFRAME MAILTO
+  </button>
+
+  <br><br>
+
+  <pre id="result">Ready</pre>
+
+  <script>
+    function topLevel() {
+      document.getElementById("result").textContent =
+        "Launching top-level mailto...";
+
+      location.href = "mailto:test@example.com";
+    }
+
+    function sandboxed() {
+      document.getElementById("result").textContent =
+        "Creating sandboxed iframe...";
+
+      const iframe = document.createElement("iframe");
+
+      iframe.sandbox = "allow-scripts";
+      iframe.style.display = "none";
+
+      document.body.appendChild(iframe);
+
+      iframe.srcdoc = `
+        <!doctype html>
+        <html>
+        <body>
+          <script>
+            location.href = "mailto:test@example.com";
+          <\/script>
+        </body>
+        </html>
+      `;
+    }
+  </script>
 </body>
 </html>
