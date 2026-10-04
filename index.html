@@ -1,52 +1,14 @@
 <!doctype html>
-<meta name="viewport" content="width=device-width">
+<html>
+<body>
 
-<h2>Edge Android Intent Boundary Test</h2>
+<h2>Edge Origin Isolation Test</h2>
 
-<button onclick="normal()">NORMAL HTTPS</button>
-<button onclick="intent()">INTENT HTTPS</button>
-<button onclick="iframeIntent()">IFRAME INTENT</button>
-<button onclick="delayed()">DELAYED INTENT</button>
+<iframe
+  src="https://edge-download-test.netlify.app/"
+  allow="camera; microphone"
+  style="width:100%;height:300px;border:1px solid black">
+</iframe>
 
-<pre id="out">waiting...</pre>
-
-<script>
-function log(x) {
-  document.getElementById('out').textContent = x;
-}
-
-function normal() {
-  location.href = 'https://example.com/';
-}
-
-function intent() {
-  location.href =
-    'intent://example.com/#Intent;' +
-    'scheme=https;' +
-    'action=android.intent.action.VIEW;' +
-    'end';
-}
-
-function iframeIntent() {
-  const f = document.createElement('iframe');
-  f.style.display = 'none';
-  f.src =
-    'intent://example.com/#Intent;' +
-    'scheme=https;' +
-    'action=android.intent.action.VIEW;' +
-    'end';
-  document.body.appendChild(f);
-  log('iframe intent launched');
-}
-
-function delayed() {
-  log('waiting 3 seconds...');
-  setTimeout(() => {
-    location.href =
-      'intent://example.com/#Intent;' +
-      'scheme=https;' +
-      'action=android.intent.action.VIEW;' +
-      'end';
-  }, 3000);
-}
-</script>
+</body>
+</html>
