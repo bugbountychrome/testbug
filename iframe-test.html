@@ -1,0 +1,23 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width">
+
+<h2>LNA Cross-Origin iframe Test</h2>
+
+<p>NO DELEGATION:</p>
+
+<iframe
+  src="https://testbug-b.bugbounty336.workers.dev"
+  width="100%"
+  height="250">
+</iframe>
+
+<hr>
+
+<p>WITH DELEGATION:</p>
+
+<iframe
+  src="https://testbug-b.bugbounty336.workers.dev"
+  allow="local-network-access"
+  width="100%"
+  height="250">
+</iframe>
