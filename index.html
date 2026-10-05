@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali Oversized PBO Mip Regression v5</title>
+<title>Mali NPOT Oversized PBO TexSubImage Regression v6</title>
 <style>
 body{font-family:monospace;background:#111;color:#eee;padding:14px}
 button{font-size:16px;padding:10px;margin:4px 0}
@@ -11,12 +11,12 @@ pre{white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
-<h3>Mali Oversized PBO Mip Regression v5</h3>
-<button id="a">A: exact PBO vs 2x PBO</button>
-<button id="b">B: mip1 exact vs oversized PBO</button>
-<button id="c">C: mip2 exact vs oversized PBO</button>
-<button id="d">D: mip chain exact vs oversized PBO</button>
-<button id="e">E: NPOT mip oversized PBO</button>
+<h3>Mali NPOT Oversized PBO TexSubImage Regression v6</h3>
+<button id="a">A: NPOT level0 TexSub</button>
+<button id="b">B: NPOT mip1 TexSub</button>
+<button id="c">C: NPOT mip2 TexSub</button>
+<button id="d">D: NPOT mip1 nonzero PBO offset</button>
+<button id="e">E: POT mip1 control</button>
 <button id="clear">Clear</button>
 <pre id="out">Ready.</pre>
 <script>
@@ -70,45 +70,52 @@ function data(n,seed){
  return a;
 }
 
-function uploadLevel(tex,w,h,level,mode,seed,sub){
- gl.bindTexture(gl.TEXTURE_2D,tex);
+function tex(){
+ const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
  gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
- const bytes=w*h*4;
- const src=data(bytes,seed);
-
- if(mode==="exact"){
-   const b=gl.createBuffer();
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
-   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,src,gl.STREAM_DRAW);
-   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
-   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,0);
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
- }else if(mode==="oversized"){
-   const extra=Math.max(4096,bytes*2);
-   const b=gl.createBuffer();
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
-   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,extra,gl.STREAM_DRAW);
-   gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,src);
-   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
-   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,0);
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
- }else{
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
-   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,src);
-   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,src);
- }
- const e=gl.getError();
- if(e!==gl.NO_ERROR)throw Error("upload L"+level+" "+hex(e));
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+ return t;
 }
 
-function render(tex){
+function alloc(t,w,h,level){
+ gl.bindTexture(gl.TEXTURE_2D,t);
+ gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+ const e=gl.getError();
+ if(e!==gl.NO_ERROR)throw Error("allocation L"+level+" "+hex(e));
+}
+
+function sub(t,w,h,level,mode,seed,offset=0){
+ gl.bindTexture(gl.TEXTURE_2D,t);
+ const bytes=w*h*4,src=data(bytes,seed);
+ const extra=Math.max(4096,bytes*2);
+ const b=gl.createBuffer();
+ gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
+
+ if(mode==="exact"){
+   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,offset+bytes,gl.STREAM_DRAW);
+ }else{
+   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,offset+extra,gl.STREAM_DRAW);
+ }
+ gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,offset,src);
+ gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,offset);
+ const e=gl.getError();
+ gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
+ if(e!==gl.NO_ERROR)throw Error("TexSub L"+level+" "+hex(e));
+}
+
+function render(t,level){
+ gl.bindTexture(gl.TEXTURE_2D,t);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,level);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
  gl.viewport(0,0,64,64);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
  gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
  gl.useProgram(prog);gl.bindVertexArray(vao);
- gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
- gl.uniform1i(texLoc,0);gl.drawArrays(gl.TRIANGLES,0,6);
+ gl.activeTexture(gl.TEXTURE0);gl.uniform1i(texLoc,0);
+ gl.drawArrays(gl.TRIANGLES,0,6);
  let e=gl.getError();if(e!==gl.NO_ERROR)throw Error("draw "+hex(e));
  const p=new Uint8Array(64*64*4);
  gl.readPixels(0,0,64,64,gl.RGBA,gl.UNSIGNED_BYTE,p);
@@ -117,27 +124,17 @@ function render(tex){
  return s;
 }
 
-function makeTexture(){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
- return t;}
-
-function pair(name,w,h,level,sub){
+function pair(name,w,h,level,offset){
  init();log("=== "+name+" ===");
  try{
-   const baseW=Math.max(1,w>>level),baseH=Math.max(1,h>>level);
-   // Initialize level 0 when testing a nonzero mip, then upload target level.
-   const t1=makeTexture(),t2=makeTexture();
-   if(level>0){
-     uploadLevel(t1,w,h,0,"nonpbo",700,false);
-     uploadLevel(t2,w,h,0,"nonpbo",700,false);
-   }
-   uploadLevel(t1,baseW,baseH,level,"exact",701,sub);
-   uploadLevel(t2,baseW,baseH,level,"oversized",701,sub);
-   const a=render(t1),b=render(t2);
+   const t1=tex(),t2=tex();
+   // Allocate the target mip level first: required for TexSubImage2D.
+   alloc(t1,w,h,level); alloc(t2,w,h,level);
+   sub(t1,w,h,level,"exact",100+level,offset);
+   sub(t2,w,h,level,"oversized",100+level,offset);
+   const a=render(t1,level),b=render(t2,level);
    gl.deleteTexture(t1);gl.deleteTexture(t2);
+   log("level="+level+" size="+w+"x"+h+" requiredBytes="+(w*h*4));
    log("exact-PBO="+a+" oversized-PBO="+b);
    log(a===b?"[PASS] identical":"[!!!] MISMATCH");
  }catch(e){log("[FAIL] "+e);}
@@ -145,27 +142,11 @@ function pair(name,w,h,level,sub){
  log("");
 }
 
-document.getElementById("a").onclick=()=>pair("A: 1024x1024 level0",1024,1024,0,false);
-document.getElementById("b").onclick=()=>pair("B: 1024 base, mip1 (512x512)",1024,1024,1,false);
-document.getElementById("c").onclick=()=>pair("C: 2048 base, mip2 (512x512)",2048,2048,2,false);
-document.getElementById("d").onclick=()=>{
- init();log("=== D: mip chain exact vs oversized PBO ===");
- try{
-  const a=makeTexture(),b=makeTexture();
-  for(let l=0;l<6;l++){
-   const w=Math.max(1,2048>>l),h=Math.max(1,2048>>l);
-   uploadLevel(a,w,h,l,"exact",800+l,false);
-   uploadLevel(b,w,h,l,"oversized",800+l,false);
-  }
-  const ca=render(a),cb=render(b);
-  gl.deleteTexture(a);gl.deleteTexture(b);
-  log("exact-chain="+ca+" oversized-chain="+cb);
-  log(ca===cb?"[PASS] identical":"[!!!] MISMATCH");
- }catch(e){log("[FAIL] "+e);}
- if(gl.isContextLost())log("[!!!] CONTEXT LOST");
- log("");
-};
-document.getElementById("e").onclick=()=>pair("E: NPOT 2047x1535 mip1",2047,1535,1,true);
+document.getElementById("a").onclick=()=>pair("A: NPOT level0 1023x767",1023,767,0,0);
+document.getElementById("b").onclick=()=>pair("B: NPOT mip1 1023x767",511,383,1,0);
+document.getElementById("c").onclick=()=>pair("C: NPOT mip2 1023x767",255,191,2,0);
+document.getElementById("d").onclick=()=>pair("D: NPOT mip1 nonzero PBO offset",511,383,1,256);
+document.getElementById("e").onclick=()=>pair("E: POT mip1 control",512,512,1,0);
 document.getElementById("clear").onclick=()=>out.textContent="Ready.";
 </script>
 </body>
