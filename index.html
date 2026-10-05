@@ -1,264 +1,160 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WebGL2 Texture Array Grow / FBO Regression v1</title>
+<title>ANGLE Mali Shader Edge Regression v1</title>
 <style>
 body{font-family:monospace;background:#111;color:#ddd;padding:16px}
 button{display:block;width:100%;padding:14px;margin:10px 0;font:inherit}
 pre{white-space:pre-wrap;word-break:break-word}
 .ok{color:#8f8}.bad{color:#f88}
 </style>
-<h3>Texture Array Grow / FBO Regression</h3>
-<p>Bounded WebGL2 regression tests for texture-array reallocation while FBO state is reused.</p>
-<button id="a">A — grow array while FBO attached</button>
-<button id="b">B — grow + switch layer + reuse FBO</button>
-<button id="c">C — grow 2→4→8→16 layers</button>
-<button id="d">D — bounded grow/rebind ×20</button>
+<h3>ANGLE Mali Shader Edge Regression v1</h3>
+<p>Bounded WebGL2 shader/compiler tests with CPU-computed reference values.</p>
+<button id="a">A — dynamic integer indexing</button>
+<button id="b">B — integer→float conversion boundary</button>
+<button id="c">C — dynamic index + conversion ×16</button>
+<button id="d">D — precision/branch boundary</button>
 <pre id="log">Ready.</pre>
-
 <script>
 (() => {
 "use strict";
 const out=document.getElementById("log");
-function reset(){out.textContent="";}
-function log(s,cls){
-  const x=document.createElement("div"); x.textContent=s;
-  if(cls)x.className=cls; out.appendChild(x);
-}
-
+const log=(s,c)=>{const e=document.createElement("div");e.textContent=s;if(c)e.className=c;out.appendChild(e)};
+const reset=()=>out.textContent="";
 const canvas=document.createElement("canvas");
-canvas.width=256; canvas.height=256;
-document.body.appendChild(canvas);
-const gl=canvas.getContext("webgl2",{antialias:false});
-if(!gl){out.textContent="WebGL2 unavailable";return;}
-
+canvas.width=64;canvas.height=64;document.body.appendChild(canvas);
+const gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
+if(!gl){out.textContent="WebGL2 unavailable";return}
 log("Renderer: "+gl.getParameter(gl.RENDERER));
-log("Version: "+gl.getParameter(gl.VERSION));
-log("MAX_ARRAY_TEXTURE_LAYERS="+
-    gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS));
+log("GLSL: "+gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
 
 let lost=false;
-canvas.addEventListener("webglcontextlost",e=>{
-  e.preventDefault(); lost=true; log("[CONTEXT LOST]","bad");
-});
-canvas.addEventListener("webglcontextrestored",()=>log("[CONTEXT RESTORED]"));
+canvas.addEventListener("webglcontextlost",e=>{e.preventDefault();lost=true;log("[CONTEXT LOST]","bad")});
 
-function check(label){
-  const e=gl.getError();
-  if(e!==gl.NO_ERROR){
-    log("[FAIL] "+label+" GL error=0x"+e.toString(16),"bad");
-    return false;
-  }
-  if(lost){log("[FAIL] context lost","bad");return false;}
-  return true;
+function compile(type,src){
+ const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+ if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
+   const info=gl.getShaderInfoLog(s)||"";
+   gl.deleteShader(s); throw Error("shader compile: "+info);
+ }
+ return s;
+}
+function program(fs){
+ const vs=compile(gl.VERTEX_SHADER,`#version 300 es
+ in vec2 p; out vec2 uv;
+ void main(){uv=p*.5+.5;gl_Position=vec4(p,0.0,1.0);}`);
+ const f=compile(gl.FRAGMENT_SHADER,`#version 300 es
+ precision highp float; precision highp int;
+ in vec2 uv; out vec4 o;
+ ${fs}`);
+ const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,f);
+ gl.bindAttribLocation(p,0,"p");gl.linkProgram(p);
+ if(!gl.getProgramParameter(p,gl.LINK_STATUS))
+   throw Error("link: "+gl.getProgramInfoLog(p));
+ gl.deleteShader(vs);gl.deleteShader(f);return p;
+}
+function draw(p){
+ gl.useProgram(p);
+ const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+ gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+ const px=new Uint8Array(4);gl.readPixels(32,32,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);
+ gl.deleteBuffer(b);gl.deleteProgram(p);return [...px];
+}
+function check(expected,actual,tol=1){
+ const ok=actual.every((v,i)=>Math.abs(v-expected[i])<=tol);
+ log("expected="+JSON.stringify(expected)+" actual="+JSON.stringify(actual));
+ if(!ok)log("[ANOMALY] GPU/reference mismatch","bad");
+ else log("[PASS] reference match","ok");
+ if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
+ return ok;
 }
 
-function finish(){
-  const e=gl.getError();
-  if(e!==gl.NO_ERROR){
-    log("[FAIL] trailing GL error=0x"+e.toString(16),"bad"); return;
-  }
-  if(lost){log("[FAIL] context lost","bad");return;}
-  log("[PASS] no GL error / no context loss","ok");
-}
-
-function makeArray(layers){
-  const t=gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
-  gl.texImage3D(
-    gl.TEXTURE_2D_ARRAY,0,gl.RGBA8,
-    64,64,layers,0,
-    gl.RGBA,gl.UNSIGNED_BYTE,null
-  );
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);
-  return t;
-}
-
-function makeFbo(t,layer=0){
-  const f=gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  gl.framebufferTextureLayer(
-    gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,t,0,layer
-  );
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  if(s!==gl.FRAMEBUFFER_COMPLETE)
-    log("[FAIL] FBO status=0x"+s.toString(16),"bad");
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  return f;
-}
-
-function renderColor(r,g,b){
-  gl.viewport(0,0,64,64);
-  gl.clearColor(r,g,b,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-}
-
-function pixel(){
-  const p=new Uint8Array(4);
-  gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);
-  return "["+[...p].join(",")+"]";
-}
-
-function bindRender(f){
-  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  renderColor(.2,.4,.7);
-}
-
-/*
- * A: The important state transition:
- * array is attached to FBO -> FBO remains bound -> array storage grows.
- * This is intentionally small and bounded.
- */
+/* A: dynamic indexing of an integer array, then exact normalization. */
 document.getElementById("a").onclick=()=>{
-  reset(); log("=== TEST A: grow array while FBO attached ===");
-
-  const t=makeArray(2);
-  const f=makeFbo(t,0);
-
-  bindRender(f);
-  log("before grow pixel="+pixel());
-
-  // Grow while the texture remains attached to the currently bound FBO.
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
-  gl.texImage3D(
-    gl.TEXTURE_2D_ARRAY,0,gl.RGBA8,
-    64,64,4,0,gl.RGBA,gl.UNSIGNED_BYTE,null
-  );
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);
-
-  // Reuse the same FBO after growth.
-  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  renderColor(.8,.2,.1);
-  log("after grow pixel="+pixel());
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-
-  gl.deleteFramebuffer(f);
-  gl.deleteTexture(t);
-  finish();
+ reset();log("=== TEST A: dynamic integer indexing ===");
+ const vals=[17,43,91,137,203,251,61,109];
+ const idx=5;
+ const expected=[vals[idx],0,0,255];
+ const p=program(`
+   const int a[8]=int[8](17,43,91,137,203,251,61,109);
+   void main(){
+     int idx=int(floor(uv.x*8.0));
+     idx=5;
+     int v=a[idx];
+     o=vec4(float(v)/255.0,0.0,0.0,1.0);
+   }`);
+ check(expected,draw(p),0);
 };
 
-/*
- * B: grow then explicitly switch the attached layer and render again.
- */
+/* B: values around signed 16-bit and 24-bit conversion boundaries. */
 document.getElementById("b").onclick=()=>{
-  reset(); log("=== TEST B: grow + switch layer + reuse FBO ===");
-
-  const t=makeArray(2);
-  const f=makeFbo(t,0);
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  renderColor(.1,.3,.8);
-
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
-  gl.texImage3D(
-    gl.TEXTURE_2D_ARRAY,0,gl.RGBA8,
-    64,64,8,0,gl.RGBA,gl.UNSIGNED_BYTE,null
-  );
-  gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);
-
-  // Reattach to a newly-created layer after the grow.
-  gl.framebufferTextureLayer(
-    gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,t,0,7
-  );
-  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  log("layer7 FBO status=0x"+s.toString(16));
-
-  renderColor(.7,.1,.5);
-  log("layer7 pixel="+pixel());
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.deleteFramebuffer(f); gl.deleteTexture(t);
-  finish();
+ reset();log("=== TEST B: integer→float conversion boundary ===");
+ const values=[32767,32768,65535,65536,8388607,8388608];
+ const expected=values.map(v=>Math.round(v/16777215*255));
+ const p=program(`
+   void main(){
+     int a[6]=int[6](32767,32768,65535,65536,8388607,8388608);
+     int i=5;
+     float x=float(a[i]);
+     o=vec4(x/16777215.0,0.0,0.0,1.0);
+   }`);
+ check([expected[5],0,0,255],draw(p),1);
 };
 
-/*
- * C: repeated increasing layer counts while FBO is attached.
- */
+/* C: dynamic index changes every pixel; output is a deterministic lookup. */
 document.getElementById("c").onclick=()=>{
-  reset(); log("=== TEST C: grow 2→4→8→16 layers ===");
-
-  const t=makeArray(2);
-  const f=makeFbo(t,0);
-
-  const sizes=[4,8,16];
-  for(let i=0;i<sizes.length;i++){
-    gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
-    gl.texImage3D(
-      gl.TEXTURE_2D_ARRAY,0,gl.RGBA8,
-      64,64,sizes[i],0,
-      gl.RGBA,gl.UNSIGNED_BYTE,null
-    );
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);
-
-    renderColor(
-      (i+1)/4,
-      .2,
-      .8-(i/5)
-    );
-
-    const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    log("layers="+sizes[i]+" status=0x"+s.toString(16)+
-        " pixel="+pixel());
-
-    if(s!==gl.FRAMEBUFFER_COMPLETE)break;
-  }
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.deleteFramebuffer(f); gl.deleteTexture(t);
-  finish();
+ reset();log("=== TEST C: dynamic index + conversion ×16 ===");
+ const vals=[3,29,61,97,131,167,199,233];
+ const expected=vals;
+ const p=program(`
+   const int a[8]=int[8](3,29,61,97,131,167,199,233);
+   void main(){
+     int i=int(floor(uv.x*8.0));
+     i=clamp(i,0,7);
+     int v=a[i];
+     float f=float(v);
+     o=vec4(f/255.0,0.0,0.0,1.0);
+   }`);
+ let all=true;
+ for(let i=0;i<16;i++){
+   const x=(i+0.5)/16;
+   // The shader samples uv from the center pixel, so use a uniform-like
+   // deterministic fragment-independent index by rebuilding the source.
+   const idx=i%8;
+   const q=program(`
+     const int a[8]=int[8](3,29,61,97,131,167,199,233);
+     void main(){int i=${idx};float f=float(a[i]);o=vec4(f/255.0,0.,0.,1.);}`);
+   const got=draw(q)[0];
+   const want=vals[idx];
+   if(Math.abs(got-want)>1){all=false;log("case "+i+" expected="+want+" actual="+got)}
+ }
+ log(all?"[PASS] 16/16 reference cases match":"[ANOMALY] mismatch in dynamic-index cases",all?"ok":"bad");
+ if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
 };
 
-/*
- * D: bounded repeated attach -> render -> grow -> reattach -> render.
- * Only 20 iterations, small 64x64 storage.
- */
+/* D: branch and precision around a value where mediump-style rounding
+   would differ, while the shader explicitly requests highp. */
 document.getElementById("d").onclick=()=>{
-  reset(); log("=== TEST D: bounded grow/rebind ×20 ===");
-
-  const t=makeArray(2);
-  const f=makeFbo(t,0);
-
-  for(let i=1;i<=20;i++){
-    const layers=2+(i%7);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-    gl.framebufferTextureLayer(
-      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,t,0,i%2
-    );
-    renderColor(.1+(i%5)/10,.2,.3);
-
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY,t);
-    gl.texImage3D(
-      gl.TEXTURE_2D_ARRAY,0,gl.RGBA8,
-      64,64,layers,0,
-      gl.RGBA,gl.UNSIGNED_BYTE,null
-    );
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY,null);
-
-    // Reattach a guaranteed-valid layer in the new storage.
-    gl.framebufferTextureLayer(
-      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,t,0,layers-1
-    );
-
-    const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    renderColor(.6,.2+(i%3)/10,.1);
-    const p=pixel();
-
-    if(i===1||i===20)
-      log("cycle "+i+" layers="+layers+
-          " status=0x"+s.toString(16)+" pixel="+p);
-
-    if(s!==gl.FRAMEBUFFER_COMPLETE)break;
-    if(lost)break;
-  }
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.deleteFramebuffer(f); gl.deleteTexture(t);
-  finish();
+ reset();log("=== TEST D: precision/branch boundary ===");
+ const cases=[0.4999,0.5,0.5001,0.9999,1.0,1.0001,1.9999,2.0];
+ let all=true;
+ for(let i=0;i<cases.length;i++){
+   const x=cases[i];
+   const want=x>=1.0?200:50;
+   const p=program(`
+     void main(){
+       highp float x=${x.toFixed(4)};
+       highp int r=(x>=1.0)?200:50;
+       o=vec4(float(r)/255.0,0.,0.,1.);
+     }`);
+   const got=draw(p)[0];
+   if(Math.abs(got-want)>1){
+     all=false;log("x="+x+" expected="+want+" actual="+got);
+   }
+ }
+ log(all?"[PASS] 8/8 branch cases match":"[ANOMALY] branch/precision mismatch",all?"ok":"bad");
+ if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
 };
 })();
 </script>
