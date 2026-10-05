@@ -1,86 +1,125 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali PBO Unpack State Regression v7</title>
+<title>Mali FBO Blit + PBO Regression v8</title>
 <style>body{font-family:monospace;background:#111;color:#eee;padding:14px}button{font-size:15px;padding:10px;margin:4px 0}pre{white-space:pre-wrap}</style>
 </head><body>
-<h3>Mali PBO + UNPACK State + Reallocation v7</h3>
-<button onclick="run(0)">A: ROW_LENGTH + exact/oversized</button>
-<button onclick="run(1)">B: SKIP_PIXELS/ROWS + exact/oversized</button>
-<button onclick="run(2)">C: reallocate then mip1</button>
-<button onclick="run(3)">D: reallocate + NPOT + skips</button>
-<button onclick="run(4)">E: repeated realloc/upload stress</button>
+<h3>Mali FBO + glBlitFramebuffer + PBO v8</h3>
+<button onclick="run(0)">A: single color FBO blit</button>
+<button onclick="run(1)">B: multi-color FBO blit</button>
+<button onclick="run(2)">C: multi-color + mip-level</button>
+<button onclick="run(3)">D: blit → PBO re-upload → blit</button>
+<button onclick="run(4)">E: repeated blit/upload</button>
 <button onclick="out.textContent='Ready.'">Clear</button>
 <pre id="out">Ready.</pre>
 <script>
 "use strict";
-const out=document.getElementById("out"); const log=s=>out.textContent+=s+"\\n";
+const out=document.getElementById("out"), log=s=>out.textContent+=s+"\\n";
 let gl,prog,vao,loc;
-const H=64,W=64;
+const S=256,R=64;
+function hex(x){return "0x"+x.toString(16);}
 function init(){
  if(gl)return;
- const c=document.createElement("canvas");c.width=W;c.height=H;
+ const c=document.createElement("canvas");c.width=R;c.height=R;
  gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
  if(!gl)throw Error("WebGL2 unavailable");
  log("Renderer: "+gl.getParameter(gl.RENDERER));
  log("Version: "+gl.getParameter(gl.VERSION));
  log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
- let vs=gl.createShader(gl.VERTEX_SHADER);
+ const vs=gl.createShader(gl.VERTEX_SHADER);
  gl.shaderSource(vs,`#version 300 es
  in vec2 p;in vec2 uv;out vec2 v;void main(){v=uv;gl_Position=vec4(p,0.,1.);}`);
- gl.compileShader(vs); if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(vs));
- let fs=gl.createShader(gl.FRAGMENT_SHADER);
+ gl.compileShader(vs);if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(vs));
+ const fs=gl.createShader(gl.FRAGMENT_SHADER);
  gl.shaderSource(fs,`#version 300 es
  precision highp float;uniform sampler2D t;in vec2 v;out vec4 o;void main(){o=texture(t,v);}`);
- gl.compileShader(fs); if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(fs));
+ gl.compileShader(fs);if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(fs));
  prog=gl.createProgram();gl.attachShader(prog,vs);gl.attachShader(prog,fs);gl.linkProgram(prog);
  if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(prog));
  vao=gl.createVertexArray();gl.bindVertexArray(vao);
- let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+ const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([
- -1,-1,0,0, 1,-1,1,0, -1,1,0,1,
- -1,1,0,1, 1,-1,1,0, 1,1,1,1]),gl.STATIC_DRAW);
- let p=gl.getAttribLocation(prog,"p"),u=gl.getAttribLocation(prog,"uv");
+ -1,-1,0,0,1,-1,1,0,-1,1,0,1,
+ -1,1,0,1,1,-1,1,0,1,1,1,1]),gl.STATIC_DRAW);
+ const p=gl.getAttribLocation(prog,"p"),u=gl.getAttribLocation(prog,"uv");
  gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,16,0);
  gl.enableVertexAttribArray(u);gl.vertexAttribPointer(u,2,gl.FLOAT,false,16,8);
  loc=gl.getUniformLocation(prog,"t");
 }
-function dat(n,seed){let a=new Uint8Array(n);for(let i=0;i<n;i++)a[i]=(i*29+seed*17+(i>>>6))&255;return a;}
-function tex(){let t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+function dat(n,seed){let a=new Uint8Array(n);for(let i=0;i<n;i++)a[i]=(i*31+seed*19+(i>>>5))&255;return a;}
+function tex(w,h,l=0){
+ const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);return t;}
-function alloc(t,w,h,l=0){gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,l,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
- let e=gl.getError();if(e)throw Error("alloc "+hex(e));}
-function hex(x){return "0x"+x.toString(16);}
-function upload(t,w,h,l,mode,seed,opts={}){
- gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
- const row=opts.row||w,skipP=opts.skipP||0,skipR=opts.skipR||0,off=opts.off||0;
- gl.pixelStorei(gl.UNPACK_ROW_LENGTH,row);gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,skipP);gl.pixelStorei(gl.UNPACK_SKIP_ROWS,skipR);
- const sourceBytes=(row*(skipR+h))*4+skipP*4+64;
- const required=sourceBytes, src=dat(required,seed), b=gl.createBuffer();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
- const size=mode==="exact"?off+required:off+required*2+4096;
- gl.bufferData(gl.PIXEL_UNPACK_BUFFER,size,gl.STREAM_DRAW);
- gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,off,src);
- gl.texSubImage2D(gl.TEXTURE_2D,l,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,off);
- let e=gl.getError();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
- gl.pixelStorei(gl.UNPACK_ROW_LENGTH,0);gl.pixelStorei(gl.UNPACK_SKIP_PIXELS,0);gl.pixelStorei(gl.UNPACK_SKIP_ROWS,0);
- if(e)throw Error("upload L"+l+" "+hex(e));
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+ gl.texImage2D(gl.TEXTURE_2D,l,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+ let e=gl.getError();if(e)throw Error("tex "+hex(e));return t;
 }
-function render(t,l=0){gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,l);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,l);
- gl.viewport(0,0,W,H);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(prog);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.uniform1i(loc,0);gl.drawArrays(gl.TRIANGLES,0,6);
- let e=gl.getError();if(e)throw Error("draw "+hex(e));let p=new Uint8Array(W*H*4);gl.readPixels(0,0,W,H,gl.RGBA,gl.UNSIGNED_BYTE,p);e=gl.getError();if(e)throw Error("read "+hex(e));
- let s=0;for(let i=0;i<p.length;i++)s=(s+p[i]*(i+1))>>>0;return s;}
-function pair(name,setup){
- init();log("=== "+name+" ===");
- try{let a=tex(),b=tex();setup(a,"exact");setup(b,"oversized");let x=render(a,setup.level||0),y=render(b,setup.level||0);gl.deleteTexture(a);gl.deleteTexture(b);log("exact="+x+" oversized="+y);log(x===y?"[PASS] identical":"[!!!] MISMATCH");}
- catch(e){log("[FAIL] "+e);} if(gl.isContextLost())log("[!!!] CONTEXT LOST");log("");
+function pboUpload(t,w,h,seed,oversized=true){
+ gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+ const n=w*h*4,b=gl.createBuffer();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
+ gl.bufferData(gl.PIXEL_UNPACK_BUFFER,oversized?n*2+4096:n,gl.STREAM_DRAW);
+ gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,dat(n,seed));
+ gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+ let e=gl.getError();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
+ if(e)throw Error("upload "+hex(e));
+}
+function fboOne(t){
+ const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+ if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("FBO incomplete");
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0]);return f;
+}
+function fboTwo(a,b){
+ const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,0);
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,b,0);
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+ if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("multi FBO incomplete");
+ return f;
+}
+function fill(f,seed){
+ gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.viewport(0,0,S,S);
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+ gl.clearColor((seed&255)/255,.25,.5,1);gl.clear(gl.COLOR_BUFFER_BIT);
+}
+function blit(src,dst,w=S,h=S){
+ gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
+ gl.readBuffer(gl.COLOR_ATTACHMENT0);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+ gl.blitFramebuffer(0,0,w,h,0,0,w,h,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+ const e=gl.getError();if(e)throw Error("blit "+hex(e));
+}
+function sample(t){
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,R,R);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+ gl.useProgram(prog);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,0);
+ gl.drawArrays(gl.TRIANGLES,0,6);let e=gl.getError();if(e)throw Error("draw "+hex(e));
+ const p=new Uint8Array(R*R*4);gl.readPixels(0,0,R,R,gl.RGBA,gl.UNSIGNED_BYTE,p);e=gl.getError();if(e)throw Error("read "+hex(e));
+ let s=0;for(let i=0;i<p.length;i++)s=(s+p[i]*(i+1))>>>0;return s;
 }
 function run(n){
- if(n===0)pair("A: ROW_LENGTH",Object.assign(function(t,m){alloc(t,512,512);upload(t,256,256,0,m,11,{row:320,skipP:3,skipR:2});},{level:0}));
- if(n===1)pair("B: SKIP PIXELS/ROWS",Object.assign(function(t,m){alloc(t,300,260);upload(t,256,240,0,m,22,{row:320,skipP:7,skipR:5,off:128});},{level:0}));
- if(n===2)pair("C: reallocate then mip1",Object.assign(function(t,m){alloc(t,512,512);upload(t,512,512,0,m,31);alloc(t,256,256,1);upload(t,256,256,1,m,32,{row:288,skipP:2,skipR:1});},{level:1}));
- if(n===3)pair("D: NPOT realloc + skips",Object.assign(function(t,m){alloc(t,513,385);upload(t,513,385,0,m,41);alloc(t,257,193,1);upload(t,257,193,1,m,42,{row:288,skipP:1,skipR:2,off:256});},{level:1}));
- if(n===4)pair("E: repeated realloc/upload",Object.assign(function(t,m){alloc(t,512,512);upload(t,256,256,0,m,50);alloc(t,1024,512);upload(t,512,256,0,m,51,{row:576,skipP:3,skipR:2});alloc(t,257,129,1);upload(t,257,129,1,m,52,{row:288,skipP:2,skipR:1,off:256});alloc(t,513,257,0);upload(t,513,257,0,m,53,{row:576,skipP:1,skipR:3});},{level:0}));
+ init();log("=== "+["A: single color FBO blit","B: multi-color FBO blit","C: multi-color + mip-level","D: blit -> PBO re-upload -> blit","E: repeated blit/upload"][n]+" ===");
+ try{
+  if(n===0){
+   let a=tex(S,S),b=tex(S,S),fa=fboOne(a),fb=fboOne(b);fill(fa,21);blit(fa,fb);log("checksum="+sample(b));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
+  } else if(n===1){
+   let a=tex(S,S),b=tex(S,S),c=tex(S,S),fa=fboTwo(a,b),fb=fboOne(c);fill(fa,31);blit(fa,fb);log("checksum="+sample(c));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);[a,b,c].forEach(gl.deleteTexture.bind(gl));
+  } else if(n===2){
+   let a=tex(S,S,1),b=tex(S,S,1),c=tex(S,S,1),fa=gl.createFramebuffer(),fb=gl.createFramebuffer();
+   gl.bindFramebuffer(gl.FRAMEBUFFER,fa);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,1);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+   gl.bindFramebuffer(gl.FRAMEBUFFER,fb);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,b,1);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+   if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("mip FBO incomplete");
+   fill(fa,41);blit(fa,fb,S,S);log("checksum="+sample(b));[fa,fb].forEach(gl.deleteFramebuffer.bind(gl));[a,b,c].forEach(gl.deleteTexture.bind(gl));
+  } else if(n===3){
+   let a=tex(S,S),b=tex(S,S),c=tex(S,S),fa=fboOne(a),fb=fboOne(b),fc=fboOne(c);
+   fill(fa,51);blit(fa,fb);pboUpload(b,S,S,52,true);blit(fb,fc);log("checksum="+sample(c));
+   [fa,fb,fc].forEach(gl.deleteFramebuffer.bind(gl));[a,b,c].forEach(gl.deleteTexture.bind(gl));
+  } else {
+   let a=tex(S,S),b=tex(S,S),fa=fboOne(a),fb=fboOne(b);
+   for(let i=0;i<8;i++){fill(fa,60+i);blit(fa,fb);pboUpload(b,S,S,70+i,true);blit(fb,fa);}
+   log("checksum="+sample(a));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
+  }
+  const e=gl.getError();if(e)log("[GL ERROR] "+hex(e));else log("[PASS] no GL error");
+ }catch(e){log("[FAIL] "+e);}
+ if(gl.isContextLost())log("[!!!] CONTEXT LOST");log("");
 }
 </script></body></html>
