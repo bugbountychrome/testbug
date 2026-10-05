@@ -60,21 +60,17 @@ function shader(type,src){
 
 let program, vao, loc;
 function initDraw(){
-  const vs=shader(gl.VERTEX_SHADER,`
-    #version 300 es
-    in vec2 p;
-    in vec2 uv;
-    out vec2 vuv;
-    void main(){vuv=uv;gl_Position=vec4(p,0.0,1.0);}
-  `);
-  const fs=shader(gl.FRAGMENT_SHADER,`
-    #version 300 es
-    precision highp float;
-    uniform sampler2D tex;
-    in vec2 vuv;
-    out vec4 o;
-    void main(){o=texture(tex,vuv);}
-  `);
+  const vs=shader(gl.VERTEX_SHADER,`#version 300 es
+in vec2 p;
+in vec2 uv;
+out vec2 vuv;
+void main(){vuv=uv;gl_Position=vec4(p,0.0,1.0);}`);
+  const fs=shader(gl.FRAGMENT_SHADER,`#version 300 es
+precision highp float;
+uniform sampler2D tex;
+in vec2 vuv;
+out vec4 o;
+void main(){o=texture(tex,vuv);}`);
   program=gl.createProgram();
   gl.attachShader(program,vs); gl.attachShader(program,fs);
   gl.linkProgram(program);
