@@ -1,37 +1,52 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width">
 
-<h3>Android Intent Boundary Test</h3>
-
-<button onclick="test1()">TEST INTENT</button>
-<button onclick="test2()">TEST VIEW</button>
-
+<h3>Android WebGPU Boundary Test</h3>
 <pre id="log"></pre>
 
 <script>
 const log = x => {
-  document.getElementById("log").textContent +=
-    new Date().toISOString() + " " + x + "\n";
+  document.querySelector("#log").textContent += x + "\n";
 };
 
-function test1() {
-  log("Launching intent URL...");
+(async () => {
+  if (!navigator.gpu) {
+    log("WebGPU: NOT SUPPORTED");
+    return;
+  }
 
-  location.href =
-    "intent://example.com/#Intent;" +
-    "scheme=https;" +
-    "action=android.intent.action.VIEW;" +
-    "end";
-}
+  log("WebGPU: SUPPORTED");
 
-function test2() {
-  log("Launching normal HTTPS...");
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
 
-  location.href = "https://example.com/";
-}
+    if (!adapter) {
+      log("Adapter: NONE");
+      return;
+    }
 
-window.addEventListener("pagehide", () => log("PAGEHIDE"));
-window.addEventListener("visibilitychange", () =>
-  log("VISIBILITY=" + document.visibilityState)
-);
+    log("Adapter: OK");
+
+    const info = await adapter.requestAdapterInfo?.();
+
+    if (info) {
+      log("vendor: " + info.vendor);
+      log("architecture: " + info.architecture);
+      log("device: " + info.device);
+      log("description: " + info.description);
+    }
+
+    const device = await adapter.requestDevice();
+
+    log("Device: OK");
+
+    device.lost.then(info => {
+      log("DEVICE LOST: " + info.reason);
+      log(info.message || "");
+    });
+
+  } catch (e) {
+    log("ERROR: " + e);
+  }
+})();
 </script>
