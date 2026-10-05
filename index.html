@@ -1,160 +1,190 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Mali Shader Edge Regression v1</title>
+<title>WebGPU Dawn Buffer Lifetime Regression v1</title>
 <style>
 body{font-family:monospace;background:#111;color:#ddd;padding:16px}
 button{display:block;width:100%;padding:14px;margin:10px 0;font:inherit}
 pre{white-space:pre-wrap;word-break:break-word}
 .ok{color:#8f8}.bad{color:#f88}
 </style>
-<h3>ANGLE Mali Shader Edge Regression v1</h3>
-<p>Bounded WebGL2 shader/compiler tests with CPU-computed reference values.</p>
-<button id="a">A — dynamic integer indexing</button>
-<button id="b">B — integer→float conversion boundary</button>
-<button id="c">C — dynamic index + conversion ×16</button>
-<button id="d">D — precision/branch boundary</button>
+<h3>WebGPU Dawn Buffer Lifetime Regression</h3>
+<p>Bounded lifecycle tests for mappedAtCreation buffers and GPUDevice.destroy().</p>
+<button id="a">A — mappedAtCreation → destroy</button>
+<button id="b">B — mapAsync → destroy</button>
+<button id="c">C — destroy/recreate ×20</button>
+<button id="d">D — mapped buffers + queue submit ×20</button>
 <pre id="log">Ready.</pre>
 <script>
-(() => {
+(async()=>{
 "use strict";
 const out=document.getElementById("log");
 const log=(s,c)=>{const e=document.createElement("div");e.textContent=s;if(c)e.className=c;out.appendChild(e)};
 const reset=()=>out.textContent="";
-const canvas=document.createElement("canvas");
-canvas.width=64;canvas.height=64;document.body.appendChild(canvas);
-const gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
-if(!gl){out.textContent="WebGL2 unavailable";return}
-log("Renderer: "+gl.getParameter(gl.RENDERER));
-log("GLSL: "+gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+if(!navigator.gpu){out.textContent="WebGPU unavailable";return}
+
+let adapter,device;
+try{
+ adapter=await navigator.gpu.requestAdapter();
+ if(!adapter){out.textContent="No WebGPU adapter";return}
+ device=await adapter.requestDevice();
+}catch(e){out.textContent="WebGPU init failed: "+e;return}
+
+log("WebGPU: available");
+log("Adapter: "+(adapter.info?.architecture||"unknown"));
+log("Device: ready");
+
+let uncaptured=0;
+device.addEventListener("uncapturederror",e=>{
+ uncaptured++;
+ log("[WebGPU error] "+e.error.message,"bad");
+});
 
 let lost=false;
-canvas.addEventListener("webglcontextlost",e=>{e.preventDefault();lost=true;log("[CONTEXT LOST]","bad")});
+device.lost.then(info=>{
+ lost=true;
+ log("[DEVICE LOST] "+info.reason+" "+(info.message||""),"bad");
+});
 
-function compile(type,src){
- const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
- if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
-   const info=gl.getShaderInfoLog(s)||"";
-   gl.deleteShader(s); throw Error("shader compile: "+info);
- }
- return s;
+function fresh(){
+ return device;
 }
-function program(fs){
- const vs=compile(gl.VERTEX_SHADER,`#version 300 es
- in vec2 p; out vec2 uv;
- void main(){uv=p*.5+.5;gl_Position=vec4(p,0.0,1.0);}`);
- const f=compile(gl.FRAGMENT_SHADER,`#version 300 es
- precision highp float; precision highp int;
- in vec2 uv; out vec4 o;
- ${fs}`);
- const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,f);
- gl.bindAttribLocation(p,0,"p");gl.linkProgram(p);
- if(!gl.getProgramParameter(p,gl.LINK_STATUS))
-   throw Error("link: "+gl.getProgramInfoLog(p));
- gl.deleteShader(vs);gl.deleteShader(f);return p;
+function checkLost(){
+ if(lost){log("[FAIL] device lost","bad");return false}
+ return true;
 }
-function draw(p){
- gl.useProgram(p);
- const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
- gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
- gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
- gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
- const px=new Uint8Array(4);gl.readPixels(32,32,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);
- gl.deleteBuffer(b);gl.deleteProgram(p);return [...px];
+function buf(size=4096){
+ return fresh().createBuffer({
+   size,
+   usage:GPUBufferUsage.MAP_WRITE|GPUBufferUsage.COPY_SRC,
+   mappedAtCreation:true
+ });
 }
-function check(expected,actual,tol=1){
- const ok=actual.every((v,i)=>Math.abs(v-expected[i])<=tol);
- log("expected="+JSON.stringify(expected)+" actual="+JSON.stringify(actual));
- if(!ok)log("[ANOMALY] GPU/reference mismatch","bad");
- else log("[PASS] reference match","ok");
- if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
- return ok;
+function fill(b,size=4096){
+ const a=new Uint8Array(b.getMappedRange());
+ for(let i=0;i<size;i++)a[i]=(i*31)&255;
+}
+function pass(){
+ if(lost)return;
+ log("[PASS] no device loss","ok");
 }
 
-/* A: dynamic indexing of an integer array, then exact normalization. */
-document.getElementById("a").onclick=()=>{
- reset();log("=== TEST A: dynamic integer indexing ===");
- const vals=[17,43,91,137,203,251,61,109];
- const idx=5;
- const expected=[vals[idx],0,0,255];
- const p=program(`
-   const int a[8]=int[8](17,43,91,137,203,251,61,109);
-   void main(){
-     int idx=int(floor(uv.x*8.0));
-     idx=5;
-     int v=a[idx];
-     o=vec4(float(v)/255.0,0.0,0.0,1.0);
-   }`);
- check(expected,draw(p),0);
+/*
+ A: mappedAtCreation buffer is unmapped before device destruction.
+ The important regression property is safe teardown.
+ */
+document.getElementById("a").onclick=async()=>{
+ reset(); log("=== TEST A: mappedAtCreation → destroy ===");
+ try{
+   const d=fresh();
+   const b=d.createBuffer({
+     size:4096,
+     usage:GPUBufferUsage.MAP_WRITE|GPUBufferUsage.COPY_SRC,
+     mappedAtCreation:true
+   });
+   fill(b);
+   b.unmap();
+
+   d.destroy();
+
+   // Must not resurrect or expose the old mapping.
+   try{ b.unmap(); log("[INFO] second unmap rejected/ignored by API"); }catch(e){
+     log("[INFO] post-destroy unmap threw as expected");
+   }
+   checkLost();
+ }catch(e){log("[INFO] synchronous API rejection: "+e.message)}
 };
 
-/* B: values around signed 16-bit and 24-bit conversion boundaries. */
-document.getElementById("b").onclick=()=>{
- reset();log("=== TEST B: integer→float conversion boundary ===");
- const values=[32767,32768,65535,65536,8388607,8388608];
- const expected=values.map(v=>Math.round(v/16777215*255));
- const p=program(`
-   void main(){
-     int a[6]=int[6](32767,32768,65535,65536,8388607,8388608);
-     int i=5;
-     float x=float(a[i]);
-     o=vec4(x/16777215.0,0.0,0.0,1.0);
-   }`);
- check([expected[5],0,0,255],draw(p),1);
+/*
+ B: mapAsync pending while device is destroyed.
+ */
+document.getElementById("b").onclick=async()=>{
+ reset(); log("=== TEST B: mapAsync → destroy ===");
+ try{
+   const d=fresh();
+   const b=d.createBuffer({
+     size:4096,
+     usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST
+   });
+
+   const p=b.mapAsync(GPUMapMode.READ).then(
+     ()=>log("[INFO] mapAsync fulfilled"),
+     e=>log("[INFO] mapAsync rejected: "+e.message)
+   );
+
+   d.destroy();
+   await Promise.race([p,new Promise(r=>setTimeout(r,250))]);
+   checkLost();
+ }catch(e){log("[INFO] synchronous API rejection: "+e.message)}
 };
 
-/* C: dynamic index changes every pixel; output is a deterministic lookup. */
-document.getElementById("c").onclick=()=>{
- reset();log("=== TEST C: dynamic index + conversion ×16 ===");
- const vals=[3,29,61,97,131,167,199,233];
- const expected=vals;
- const p=program(`
-   const int a[8]=int[8](3,29,61,97,131,167,199,233);
-   void main(){
-     int i=int(floor(uv.x*8.0));
-     i=clamp(i,0,7);
-     int v=a[i];
-     float f=float(v);
-     o=vec4(f/255.0,0.0,0.0,1.0);
-   }`);
- let all=true;
- for(let i=0;i<16;i++){
-   const x=(i+0.5)/16;
-   // The shader samples uv from the center pixel, so use a uniform-like
-   // deterministic fragment-independent index by rebuilding the source.
-   const idx=i%8;
-   const q=program(`
-     const int a[8]=int[8](3,29,61,97,131,167,199,233);
-     void main(){int i=${idx};float f=float(a[i]);o=vec4(f/255.0,0.,0.,1.);}`);
-   const got=draw(q)[0];
-   const want=vals[idx];
-   if(Math.abs(got-want)>1){all=false;log("case "+i+" expected="+want+" actual="+got)}
- }
- log(all?"[PASS] 16/16 reference cases match":"[ANOMALY] mismatch in dynamic-index cases",all?"ok":"bad");
- if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
-};
+/*
+ C: bounded device/buffer lifecycle recreation.
+ */
+document.getElementById("c").onclick=async()=>{
+ reset(); log("=== TEST C: destroy/recreate ×20 ===");
+ let ok=true;
 
-/* D: branch and precision around a value where mediump-style rounding
-   would differ, while the shader explicitly requests highp. */
-document.getElementById("d").onclick=()=>{
- reset();log("=== TEST D: precision/branch boundary ===");
- const cases=[0.4999,0.5,0.5001,0.9999,1.0,1.0001,1.9999,2.0];
- let all=true;
- for(let i=0;i<cases.length;i++){
-   const x=cases[i];
-   const want=x>=1.0?200:50;
-   const p=program(`
-     void main(){
-       highp float x=${x.toFixed(4)};
-       highp int r=(x>=1.0)?200:50;
-       o=vec4(float(r)/255.0,0.,0.,1.);
-     }`);
-   const got=draw(p)[0];
-   if(Math.abs(got-want)>1){
-     all=false;log("x="+x+" expected="+want+" actual="+got);
+ for(let i=1;i<=20;i++){
+   try{
+     const ad=await navigator.gpu.requestAdapter();
+     if(!ad){ok=false;break}
+     const d=await ad.requestDevice();
+
+     const b=d.createBuffer({
+       size:4096,
+       usage:GPUBufferUsage.MAP_WRITE|GPUBufferUsage.COPY_SRC,
+       mappedAtCreation:true
+     });
+     fill(b);
+     b.unmap();
+     d.destroy();
+
+     if(i===1||i===20)log("cycle "+i+" complete");
+   }catch(e){
+     log("cycle "+i+" exception: "+e.message);
+     ok=false;break;
    }
  }
- log(all?"[PASS] 8/8 branch cases match":"[ANOMALY] branch/precision mismatch",all?"ok":"bad");
- if(gl.getError()!==gl.NO_ERROR)log("[FAIL] GL error","bad");
+ if(ok)log("[PASS] 20 lifecycle cycles completed","ok");
+};
+
+/*
+ D: mapped buffers + bounded queue submissions.
+ This intentionally uses normal validation-safe command ordering.
+ */
+document.getElementById("d").onclick=async()=>{
+ reset(); log("=== TEST D: mapped buffers + queue submit ×20 ===");
+ try{
+   const d=fresh();
+
+   const src=d.createBuffer({
+     size:4096,
+     usage:GPUBufferUsage.MAP_WRITE|GPUBufferUsage.COPY_SRC,
+     mappedAtCreation:true
+   });
+   fill(src);
+   src.unmap();
+
+   const dst=d.createBuffer({
+     size:4096,
+     usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC|
+           GPUBufferUsage.MAP_READ
+   });
+
+   for(let i=1;i<=20;i++){
+     const enc=d.createCommandEncoder();
+     enc.copyBufferToBuffer(src,0,dst,0,4096);
+     d.queue.submit([enc.finish()]);
+
+     if(i===1||i===20)log("submit "+i+" complete");
+   }
+
+   await d.queue.onSubmittedWorkDone();
+   checkLost();
+   if(!lost)log("[PASS] 20 submissions completed","ok");
+ }catch(e){
+   log("[INFO] WebGPU operation rejected: "+e.message);
+ }
 };
 })();
 </script>
