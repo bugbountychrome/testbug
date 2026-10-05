@@ -2,12 +2,15 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>WebGL Android GPU Test</title>
+  <title>Android Installed Apps Boundary</title>
 </head>
 
 <body>
 
-<button onclick="runTest()">RUN WEBGL TEST</button>
+<h3>Installed Apps Boundary Test</h3>
+
+<button onclick="testTop()">TEST TOP LEVEL</button>
+<button onclick="testFrame()">TEST CROSS ORIGIN FRAME</button>
 
 <pre id="log"></pre>
 
@@ -16,107 +19,50 @@ function log(x) {
   document.getElementById("log").textContent += x + "\n";
 }
 
-function runTest() {
-  document.getElementById("log").textContent = "";
+async function testTop() {
+  log("");
+  log("=== TOP LEVEL ===");
+  log("origin: " + location.origin);
 
-  const canvas = document.createElement("canvas");
-
-  const gl = canvas.getContext("webgl2", {
-    antialias: false
-  });
-
-  if (!gl) {
-    log("WebGL2: NOT SUPPORTED");
+  if (!("getInstalledRelatedApps" in navigator)) {
+    log("API: NOT SUPPORTED");
     return;
   }
 
-  log("WebGL2: SUPPORTED");
+  log("API: SUPPORTED");
 
-  const debug = gl.getExtension("WEBGL_debug_renderer_info");
+  try {
+    const apps = await navigator.getInstalledRelatedApps();
 
-  if (debug) {
-    log(
-      "Vendor: " +
-      gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)
-    );
+    log("SUCCESS");
+    log("count: " + apps.length);
 
-    log(
-      "Renderer: " +
-      gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
-    );
-  }
-
-  let lost = false;
-
-  canvas.addEventListener("webglcontextlost", function(e) {
-    e.preventDefault();
-    lost = true;
-    log("CONTEXT LOST");
-  });
-
-  canvas.addEventListener("webglcontextrestored", function() {
-    log("CONTEXT RESTORED");
-  });
-
-  // NPOT immutable texture
-  const tex = gl.createTexture();
-
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-
-  const width = 257;
-  const height = 193;
-
-  gl.texStorage2D(
-    gl.TEXTURE_2D,
-    8,
-    gl.RGBA8,
-    width,
-    height
-  );
-
-  log("Immutable NPOT texture: CREATED");
-
-  gl.texParameteri(
-    gl.TEXTURE_2D,
-    gl.TEXTURE_BASE_LEVEL,
-    0
-  );
-
-  log("BASE_LEVEL = 0");
-
-  gl.getError();
-
-  // Trigger the affected state transition
-  gl.texParameteri(
-    gl.TEXTURE_2D,
-    gl.TEXTURE_BASE_LEVEL,
-    1
-  );
-
-  const err = gl.getError();
-
-  log("BASE_LEVEL = 1");
-  log("gl.getError() = " + err);
-
-  if (err === gl.NO_ERROR) {
-    log("BASE_LEVEL CHANGE ACCEPTED");
-  }
-
-  // Give the GPU command queue time to process
-  setTimeout(() => {
-
-    log("");
-    log("=== RESULT ===");
-
-    if (lost) {
-      log("Context was lost.");
-    } else {
-      log("Context still alive.");
+    for (const app of apps) {
+      log(JSON.stringify(app));
     }
 
-    log("TEST COMPLETE");
+  } catch (e) {
+    log("ERROR: " + e.name);
+    log(e.message);
+  }
+}
 
-  }, 1500);
+function testFrame() {
+  log("");
+  log("=== CROSS ORIGIN FRAME ===");
+
+  const frame = document.createElement("iframe");
+
+  frame.src =
+    "https://example.com/";
+
+  frame.style.width = "100%";
+  frame.style.height = "100px";
+
+  document.body.appendChild(frame);
+
+  log("iframe created");
+  log("iframe origin: https://example.com");
 }
 </script>
 
