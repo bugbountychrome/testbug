@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali Texture Reallocation Regression v4</title>
+<title>Mali Oversized PBO Mip Regression v5</title>
 <style>
 body{font-family:monospace;background:#111;color:#eee;padding:14px}
 button{font-size:16px;padding:10px;margin:4px 0}
@@ -11,12 +11,12 @@ pre{white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
-<h3>Mali Texture Reallocation Regression v4</h3>
-<button id="a">A: TexSubImage2D 512→same</button>
-<button id="b">B: TexSubImage2D 512→256 region</button>
-<button id="c">C: TexImage2D reallocate 512→1024→256</button>
-<button id="d">D: PBO reallocation sequence</button>
-<button id="e">E: NPOT reallocation sequence</button>
+<h3>Mali Oversized PBO Mip Regression v5</h3>
+<button id="a">A: exact PBO vs 2x PBO</button>
+<button id="b">B: mip1 exact vs oversized PBO</button>
+<button id="c">C: mip2 exact vs oversized PBO</button>
+<button id="d">D: mip chain exact vs oversized PBO</button>
+<button id="e">E: NPOT mip oversized PBO</button>
 <button id="clear">Clear</button>
 <pre id="out">Ready.</pre>
 <script>
@@ -27,8 +27,8 @@ function hex(x){return "0x"+x.toString(16);}
 let gl,prog,vao,texLoc;
 
 function init(){
- if(gl) return;
- const c=document.createElement("canvas"); c.width=64;c.height=64;
+ if(gl)return;
+ const c=document.createElement("canvas");c.width=64;c.height=64;
  gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
  if(!gl)throw Error("WebGL2 unavailable");
  log("Renderer: "+gl.getParameter(gl.RENDERER));
@@ -64,42 +64,41 @@ void main(){o=texture(t,v);}`);
  texLoc=gl.getUniformLocation(prog,"t");
 }
 
-function data(w,h,seed){
- const a=new Uint8Array(w*h*4);
- for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-  let i=(y*w+x)*4;
-  a[i]=(x*19+y*7+seed)&255;
-  a[i+1]=(x*5+y*23+seed*3)&255;
-  a[i+2]=(x*11^y*13^seed)&255;
-  a[i+3]=255;
- }
+function data(n,seed){
+ const a=new Uint8Array(n);
+ for(let i=0;i<n;i++)a[i]=(i*37+seed*13+(i>>>7))&255;
  return a;
 }
 
-function upload(tex,w,h,seed,pbo,sub){
+function uploadLevel(tex,w,h,level,mode,seed,sub){
  gl.bindTexture(gl.TEXTURE_2D,tex);
  gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
- const d=data(w,h,seed);
+ const bytes=w*h*4;
+ const src=data(bytes,seed);
 
- if(pbo){
-  const b=gl.createBuffer();
-  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
-  gl.bufferData(gl.PIXEL_UNPACK_BUFFER,d,gl.STREAM_DRAW);
-  if(sub)
-    gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
-  else
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,0);
-  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
-  gl.deleteBuffer(b);
+ if(mode==="exact"){
+   const b=gl.createBuffer();
+   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
+   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,src,gl.STREAM_DRAW);
+   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,0);
+   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
+ }else if(mode==="oversized"){
+   const extra=Math.max(4096,bytes*2);
+   const b=gl.createBuffer();
+   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
+   gl.bufferData(gl.PIXEL_UNPACK_BUFFER,extra,gl.STREAM_DRAW);
+   gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,src);
+   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,0);
+   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
  }else{
-  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
-  if(sub)
-    gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,d);
-  else
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,d);
+   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+   if(sub) gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,src);
+   else gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,src);
  }
  const e=gl.getError();
- if(e!==gl.NO_ERROR)throw Error("upload "+w+"x"+h+" error "+hex(e));
+ if(e!==gl.NO_ERROR)throw Error("upload L"+level+" "+hex(e));
 }
 
 function render(tex){
@@ -107,6 +106,8 @@ function render(tex){
  gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
  gl.useProgram(prog);gl.bindVertexArray(vao);
  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
  gl.uniform1i(texLoc,0);gl.drawArrays(gl.TRIANGLES,0,6);
  let e=gl.getError();if(e!==gl.NO_ERROR)throw Error("draw "+hex(e));
  const p=new Uint8Array(64*64*4);
@@ -116,75 +117,55 @@ function render(tex){
  return s;
 }
 
-function sequence(name,pbo,steps){
- init();log("=== "+name+" ["+(pbo?"PBO":"non-PBO")+"] ===");
- const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+function makeTexture(){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
- try{
-  const sums=[];
-  for(const st of steps){
-   upload(t,st.w,st.h,st.seed,pbo,st.sub);
-   const s=render(t); sums.push(s);
-   log(st.label+" => "+s);
-   if(gl.isContextLost())throw Error("context lost");
-  }
-  log("[PASS] sequence completed");
-  gl.deleteTexture(t);
-  return sums;
- }catch(e){log("[FAIL] "+e);try{gl.deleteTexture(t)}catch(_){}return null;}
-}
+ return t;}
 
-function pair(name,steps){
+function pair(name,w,h,level,sub){
  init();log("=== "+name+" ===");
- let a=sequence("non-PBO",false,steps);
- if(gl.isContextLost()){log("[!!!] CONTEXT LOST");log("");return;}
- let b=sequence("PBO",true,steps);
- if(a&&b)log(a.join(",")===b.join(",")?
-   "[PASS] PBO/non-PBO sequence identical":
-   "[!!!] SEQUENCE MISMATCH");
+ try{
+   const baseW=Math.max(1,w>>level),baseH=Math.max(1,h>>level);
+   // Initialize level 0 when testing a nonzero mip, then upload target level.
+   const t1=makeTexture(),t2=makeTexture();
+   if(level>0){
+     uploadLevel(t1,w,h,0,"nonpbo",700,false);
+     uploadLevel(t2,w,h,0,"nonpbo",700,false);
+   }
+   uploadLevel(t1,baseW,baseH,level,"exact",701,sub);
+   uploadLevel(t2,baseW,baseH,level,"oversized",701,sub);
+   const a=render(t1),b=render(t2);
+   gl.deleteTexture(t1);gl.deleteTexture(t2);
+   log("exact-PBO="+a+" oversized-PBO="+b);
+   log(a===b?"[PASS] identical":"[!!!] MISMATCH");
+ }catch(e){log("[FAIL] "+e);}
  if(gl.isContextLost())log("[!!!] CONTEXT LOST");
  log("");
 }
 
-document.getElementById("a").onclick=()=>pair("A: same-size TexSubImage2D",[
- {label:"initial 512 TexImage",w:512,h:512,seed:1,sub:false},
- {label:"512 TexSubImage",w:512,h:512,seed:2,sub:true},
- {label:"512 TexSubImage",w:512,h:512,seed:3,sub:true}
-]);
-
-document.getElementById("b").onclick=()=>pair("B: smaller TexSubImage region",[
- {label:"initial 512 TexImage",w:512,h:512,seed:10,sub:false},
- {label:"256 TexSubImage at 0,0",w:256,h:256,seed:11,sub:true},
- {label:"256 TexSubImage at 128,128",w:256,h:256,seed:12,sub:true}
-]);
-
-document.getElementById("c").onclick=()=>pair("C: TexImage reallocation",[
- {label:"512 TexImage",w:512,h:512,seed:20,sub:false},
- {label:"1024 TexImage",w:1024,h:1024,seed:21,sub:false},
- {label:"256 TexImage",w:256,h:256,seed:22,sub:false},
- {label:"1024 TexImage",w:1024,h:512,seed:23,sub:false},
- {label:"512 TexImage",w:512,h:1024,seed:24,sub:false}
-]);
-
-document.getElementById("d").onclick=()=>pair("D: PBO reallocation sequence",[
- {label:"512 TexImage",w:512,h:512,seed:30,sub:false},
- {label:"1024 TexImage",w:1024,h:1024,seed:31,sub:false},
- {label:"1024 TexSub",w:1024,h:1024,seed:32,sub:true},
- {label:"256 TexImage",w:256,h:256,seed:33,sub:false},
- {label:"1024x512 TexImage",w:1024,h:512,seed:34,sub:false}
-]);
-
-document.getElementById("e").onclick=()=>pair("E: NPOT reallocation",[
- {label:"511x383 TexImage",w:511,h:383,seed:40,sub:false},
- {label:"1023x767 TexImage",w:1023,h:767,seed:41,sub:false},
- {label:"1023x767 TexSub",w:1023,h:767,seed:42,sub:true},
- {label:"513x257 TexImage",w:513,h:257,seed:43,sub:false},
- {label:"2047x1023 TexImage",w:2047,h:1023,seed:44,sub:false}
-]);
-
+document.getElementById("a").onclick=()=>pair("A: 1024x1024 level0",1024,1024,0,false);
+document.getElementById("b").onclick=()=>pair("B: 1024 base, mip1 (512x512)",1024,1024,1,false);
+document.getElementById("c").onclick=()=>pair("C: 2048 base, mip2 (512x512)",2048,2048,2,false);
+document.getElementById("d").onclick=()=>{
+ init();log("=== D: mip chain exact vs oversized PBO ===");
+ try{
+  const a=makeTexture(),b=makeTexture();
+  for(let l=0;l<6;l++){
+   const w=Math.max(1,2048>>l),h=Math.max(1,2048>>l);
+   uploadLevel(a,w,h,l,"exact",800+l,false);
+   uploadLevel(b,w,h,l,"oversized",800+l,false);
+  }
+  const ca=render(a),cb=render(b);
+  gl.deleteTexture(a);gl.deleteTexture(b);
+  log("exact-chain="+ca+" oversized-chain="+cb);
+  log(ca===cb?"[PASS] identical":"[!!!] MISMATCH");
+ }catch(e){log("[FAIL] "+e);}
+ if(gl.isContextLost())log("[!!!] CONTEXT LOST");
+ log("");
+};
+document.getElementById("e").onclick=()=>pair("E: NPOT 2047x1535 mip1",2047,1535,1,true);
 document.getElementById("clear").onclick=()=>out.textContent="Ready.";
 </script>
 </body>
