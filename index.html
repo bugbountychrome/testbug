@@ -2,14 +2,15 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>FSA Read Grant Test</title>
+  <title>FSA Revocation PoC</title>
 </head>
 
 <body>
 
-<button onclick="setup()">1. PILIH FOLDER</button>
-<button onclick="readFile()">2. BACA FILE</button>
-<button onclick="resetLog()">CLEAR</button>
+<button onclick="setup()">1. SETUP</button>
+<button onclick="removeFile()">2. REMOVE FILE</button>
+<button onclick="moveFile()">3. MOVE FILE</button>
+<button onclick="readMovedFile()">4. READ MOVED FILE</button>
 
 <pre id="log"></pre>
 
@@ -17,75 +18,136 @@
 let dirHandle = null;
 let fileHandle = null;
 
-function log(x) {
+const log = (x) => {
   document.getElementById("log").textContent += x + "\n";
-}
-
-function resetLog() {
-  document.getElementById("log").textContent = "";
-}
+};
 
 async function setup() {
-  resetLog();
+  document.getElementById("log").textContent = "";
 
   try {
     log("Origin: " + location.origin);
 
-    dirHandle = await window.showDirectoryPicker();
+    dirHandle = await showDirectoryPicker({
+      mode: "readwrite"
+    });
 
     log("DIRECTORY HANDLE: OK");
 
-    fileHandle = await dirHandle.getFileHandle(
-      "FSA_TEST.txt"
-    );
+    fileHandle = await dirHandle.getFileHandle("FSA_TEST.txt");
 
     log("FILE HANDLE: OK");
     log("name: " + fileHandle.name);
 
-    const permission = await fileHandle.queryPermission({
-      mode: "read"
-    });
+    log(
+      "read permission: " +
+      await fileHandle.queryPermission({ mode: "read" })
+    );
 
-    log("permission: " + permission);
+    log(
+      "write permission: " +
+      await fileHandle.queryPermission({ mode: "readwrite" })
+    );
+
+    const file = await fileHandle.getFile();
+
+    log("INITIAL CONTENT: " + await file.text());
 
   } catch (e) {
-    log("ERROR: " + e.name);
+    log("SETUP ERROR: " + e.name);
     log(e.message);
   }
 }
 
-async function readFile() {
+async function removeFile() {
   try {
-
     if (!fileHandle) {
-      log("No file handle. Run SETUP first.");
+      log("Run SETUP first.");
       return;
     }
 
     log("");
-    log("=== READING ===");
+    log("=== REMOVE ===");
 
-    const permission = await fileHandle.queryPermission({
-      mode: "read"
-    });
+    await fileHandle.remove();
 
-    log("permission: " + permission);
+    log("remove(): SUCCESS");
 
-    const file = await fileHandle.getFile();
+    log(
+      "read permission after remove: " +
+      await fileHandle.queryPermission({ mode: "read" })
+    );
 
-    log("getFile: SUCCESS");
-    log("name: " + file.name);
-    log("size: " + file.size);
+    log(
+      "write permission after remove: " +
+      await fileHandle.queryPermission({ mode: "readwrite" })
+    );
 
-    const text = await file.text();
+    try {
+      await fileHandle.getFile();
+      log("OLD HANDLE READ: SUCCESS");
+    } catch (e) {
+      log("OLD HANDLE READ: " + e.name);
+    }
 
-    log("CONTENT: " + text);
+    log("");
+    log("NOW RECREATE FSA_TEST.txt EXTERNALLY");
+    log("Use Termux before pressing MOVE.");
 
   } catch (e) {
+    log("REMOVE ERROR: " + e.name);
+    log(e.message);
+  }
+}
 
+async function moveFile() {
+  try {
+    if (!fileHandle || !dirHandle) {
+      log("Run SETUP first.");
+      return;
+    }
+
+    log("");
+    log("=== MOVE ===");
+
+    await fileHandle.move(
+      dirHandle,
+      "FSA_MOVED.txt"
+    );
+
+    log("move(): SUCCESS");
+
+  } catch (e) {
+    log("move(): " + e.name);
+    log(e.message);
+  }
+}
+
+async function readMovedFile() {
+  try {
+    log("");
+    log("=== READ MOVED FILE ===");
+
+    const newHandle =
+      await dirHandle.getFileHandle("FSA_MOVED.txt");
+
+    log("NEW HANDLE: SUCCESS");
+
+    log(
+      "new handle read permission: " +
+      await newHandle.queryPermission({ mode: "read" })
+    );
+
+    const file = await newHandle.getFile();
+
+    const content = await file.text();
+
+    log("READ SUCCESS");
+    log("CONTENT: " + content);
+
+  } catch (e) {
     log("READ ERROR: " + e.name);
     log(e.message);
-
   }
 }
 </script>
