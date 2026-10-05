@@ -1,251 +1,181 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Mali FBO State Blit v13.1</title>
+<title>Mali FBO Query Flush Regression</title>
 <style>
-body{font-family:monospace;background:#111;color:#eee;padding:16px}
-button{display:block;width:100%;max-width:420px;font-size:16px;padding:12px;margin:8px 0}
+body{font-family:monospace;background:#111;color:#ddd;padding:16px}
+button{display:block;width:100%;padding:14px;margin:10px 0;font:inherit}
 pre{white-space:pre-wrap;word-break:break-word}
+.ok{color:#8f8}.bad{color:#f88}
 </style>
-</head>
-<body>
-<h3>ANGLE/Mali FBO State + Multi-Attachment + Blit v13.1</h3>
-<button id="a">A — single attachment control</button>
-<button id="b">B — 2 color attachments control</button>
-<button id="c">C — BASE_LEVEL=1 + 2 attachments</button>
-<button id="d">D — BASE_LEVEL toggle 0↔1 + blit</button>
-<button id="e">E — repeated attach/state/blit ×20</button>
-<pre id="out">Ready.</pre>
+<h3>Mali FBO Query Flush Regression</h3>
+<p>Bounded WebGL2 test for FBO unbind/delete while GPU queries are pending.</p>
+<button id="a">A — query + unbind FBO</button>
+<button id="b">B — query + delete FBO</button>
+<button id="c">C — query + delete/recreate ×20</button>
+<button id="d">D — query + FBO state churn ×20</button>
+<pre id="log">Ready.</pre>
 
 <script>
-(function(){
+(() => {
 "use strict";
+const out=document.getElementById("log");
+function log(s,cls){
+  const x=document.createElement("div"); x.textContent=s;
+  if(cls)x.className=cls; out.appendChild(x);
+}
+function reset(){out.textContent="";}
 
-var out=document.getElementById("out");
-function log(s){out.textContent+=s+"\\n";}
-function hx(x){return "0x"+x.toString(16);}
+const canvas=document.createElement("canvas");
+canvas.width=256; canvas.height=256;
+document.body.appendChild(canvas);
 
-var gl=null, W=128, H=128;
+const gl=canvas.getContext("webgl2",{antialias:false});
+if(!gl){out.textContent="WebGL2 unavailable";return;}
 
-function init(){
-  if(gl)return;
-  var canvas=document.createElement("canvas");
-  canvas.width=W; canvas.height=H;
-  gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
-  if(!gl)throw new Error("WebGL2 unavailable");
-  log("Renderer: "+gl.getParameter(gl.RENDERER));
-  log("Version: "+gl.getParameter(gl.VERSION));
-  log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
+const ext=gl.getExtension("EXT_disjoint_timer_query_webgl2");
+log("Renderer: "+gl.getParameter(gl.RENDERER));
+log("Version: "+gl.getParameter(gl.VERSION));
+log("Query extension: "+(ext?"AVAILABLE":"UNAVAILABLE"));
+
+let lost=false;
+canvas.addEventListener("webglcontextlost",e=>{
+  e.preventDefault(); lost=true; log("[CONTEXT LOST]","bad");
+});
+canvas.addEventListener("webglcontextrestored",()=>log("[CONTEXT RESTORED]"));
+
+function err(label){
+  const e=gl.getError();
+  if(e!==gl.NO_ERROR){log("[FAIL] "+label+" GL error=0x"+e.toString(16),"bad");return false;}
+  return true;
 }
 
-function check(where){
-  var e=gl.getError();
-  if(e!==gl.NO_ERROR)throw new Error(where+" "+hx(e));
-}
-
-function texture(){
-  var t=gl.createTexture();
+function makeTex(size=128){
+  const t=gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST_MIPMAP_NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,W,H,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
-  gl.texImage2D(gl.TEXTURE_2D,1,gl.RGBA8,W/2,H/2,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
-  check("texture allocation");
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,size,size,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.bindTexture(gl.TEXTURE_2D,null);
   return t;
 }
 
-function framebuffer(){
-  return gl.createFramebuffer();
-}
-
-function attach(f,t0,t1,level){
+function makeFbo(t){
+  const f=gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,t0,level
-  );
-
-  if(t1){
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,
-      gl.TEXTURE_2D,t1,level
-    );
-    gl.drawBuffers([
-      gl.COLOR_ATTACHMENT0,
-      gl.COLOR_ATTACHMENT1
-    ]);
-  }else{
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,
-      gl.TEXTURE_2D,null,0
-    );
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  }
-
-  var s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  if(s!==gl.FRAMEBUFFER_COMPLETE)
-    throw new Error("FBO "+hx(s));
-
-  check("attach");
-}
-
-function clearFBO(w,h,r,g,b){
-  gl.viewport(0,0,w,h);
-  gl.clearColor(r,g,b,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  check("clear");
-}
-
-function pixel(attachment){
-  var p=new Uint8Array(4);
-  gl.readBuffer(attachment);
-  gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);
-  check("readPixels");
-  return "["+p[0]+","+p[1]+","+p[2]+","+p[3]+"]";
-}
-
-function blit(src,dst,w,h){
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
-  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,
+                          gl.TEXTURE_2D,t,0);
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  gl.blitFramebuffer(
-    0,0,w,h,
-    0,0,w,h,
-    gl.COLOR_BUFFER_BIT,
-    gl.NEAREST
-  );
-  check("blit");
-}
-
-function setBase(t,level){
-  gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
-  check("BASE_LEVEL="+level);
-}
-
-function cleanup(fs,ts){
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.bindTexture(gl.TEXTURE_2D,null);
-  fs.forEach(function(x){gl.deleteFramebuffer(x);});
-  ts.forEach(function(x){gl.deleteTexture(x);});
+  return f;
 }
 
-function run(which){
-  try{
-    init();
-    log("=== TEST "+which+" ===");
-
-    var a,b,c,d,f,g;
-
-    if(which==="A"){
-      a=texture();
-      f=framebuffer();
-      attach(f,a,null,0);
-      clearFBO(W,H,.2,.3,.4);
-      log("pixel="+pixel(gl.COLOR_ATTACHMENT0));
-      cleanup([f],[a]);
-
-    }else if(which==="B"){
-      a=texture(); b=texture();
-      f=framebuffer();
-      attach(f,a,b,0);
-      clearFBO(W,H,.2,.3,.4);
-      log("attachment0="+pixel(gl.COLOR_ATTACHMENT0));
-      log("attachment1="+pixel(gl.COLOR_ATTACHMENT1));
-      cleanup([f],[a,b]);
-
-    }else if(which==="C"){
-      a=texture(); b=texture();
-      setBase(a,1);
-      setBase(b,1);
-      f=framebuffer();
-      attach(f,a,b,1);
-      clearFBO(W/2,H/2,.3,.2,.1);
-      log("attachment0="+pixel(gl.COLOR_ATTACHMENT0));
-      log("attachment1="+pixel(gl.COLOR_ATTACHMENT1));
-      cleanup([f],[a,b]);
-
-    }else if(which==="D"){
-      a=texture(); b=texture();
-      c=texture(); d=texture();
-      f=framebuffer(); g=framebuffer();
-
-      setBase(a,0); setBase(b,0);
-      attach(f,a,b,0);
-
-      setBase(c,1); setBase(d,1);
-      attach(g,c,d,1);
-
-      clearFBO(W,H,.1,.4,.7);
-      blit(f,g,W/2,H/2);
-
-      setBase(a,1); setBase(b,1);
-      setBase(a,0); setBase(b,0);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER,g);
-      log("destination0="+pixel(gl.COLOR_ATTACHMENT0));
-      log("destination1="+pixel(gl.COLOR_ATTACHMENT1));
-
-      cleanup([f,g],[a,b,c,d]);
-
-    }else{
-      a=texture(); b=texture();
-      c=texture(); d=texture();
-      f=framebuffer(); g=framebuffer();
-
-      for(var i=0;i<20;i++){
-        var level=(i%2);
-        var sz=level?W/2:W;
-
-        setBase(a,level);
-        setBase(b,level);
-        attach(f,a,b,level);
-
-        clearFBO(sz,sz,((i+1)/21),.25,.5);
-
-        setBase(c,level);
-        setBase(d,level);
-        attach(g,c,d,level);
-
-        blit(f,g,sz,sz);
-
-        gl.bindFramebuffer(gl.FRAMEBUFFER,g);
-        if(i===0 || i===19){
-          log("cycle "+(i+1)+" level="+level+
-              " p0="+pixel(gl.COLOR_ATTACHMENT0));
-        }
-      }
-
-      cleanup([f,g],[a,b,c,d]);
-    }
-
-    check("final");
-    log("[PASS] no GL error");
-  }catch(e){
-    log("[FAIL] "+e.message);
-    try{
-      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-      gl.bindTexture(gl.TEXTURE_2D,null);
-    }catch(ignore){}
-  }
-
-  if(gl && gl.isContextLost())log("[!!!] CONTEXT LOST");
-  log("");
+function render(f){
+  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.viewport(0,0,128,128);
+  gl.clearColor(.17,.31,.49,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
 }
 
-document.getElementById("a").onclick=function(){run("A");};
-document.getElementById("b").onclick=function(){run("B");};
-document.getElementById("c").onclick=function(){run("C");};
-document.getElementById("d").onclick=function(){run("D");};
-document.getElementById("e").onclick=function(){run("E");};
+function makeQuery(){
+  if(!ext)return null;
+  const q=gl.createQuery();
+  gl.beginQuery(ext.TIME_ELAPSED_EXT,q);
+  // Small bounded GPU workload.
+  gl.clearColor(.23,.41,.67,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.endQuery(ext.TIME_ELAPSED_EXT);
+  return q;
+}
+
+function poll(q){
+  if(!q)return true;
+  // Poll once; do not spin-wait.
+  const available=gl.getQueryParameter(q,gl.QUERY_RESULT_AVAILABLE);
+  const disjoint=gl.getParameter(ext.GPU_DISJOINT_EXT);
+  return {available,disjoint};
+}
+
+function finishCheck(){
+  const e=gl.getError();
+  if(e!==gl.NO_ERROR){log("[FAIL] trailing GL error=0x"+e.toString(16),"bad");return false;}
+  if(lost){log("[FAIL] context lost","bad");return false;}
+  log("[PASS] no GL error / no context loss","ok");
+  return true;
+}
+
+document.getElementById("a").onclick=()=>{
+ reset(); log("=== TEST A: query + unbind FBO ===");
+ if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
+ const t=makeTex(),f=makeFbo(t);
+ render(f);
+ const q=makeQuery();
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+ const p=poll(q);
+ log("query available="+p.available+" disjoint="+p.disjoint);
+ gl.deleteQuery(q); gl.deleteFramebuffer(f); gl.deleteTexture(t);
+ finishCheck();
+};
+
+document.getElementById("b").onclick=()=>{
+ reset(); log("=== TEST B: query + delete FBO ===");
+ if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
+ const t=makeTex(),f=makeFbo(t);
+ render(f);
+ const q=makeQuery();
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+ gl.deleteFramebuffer(f);
+ gl.deleteTexture(t);
+ const p=poll(q);
+ log("query available="+p.available+" disjoint="+p.disjoint);
+ gl.deleteQuery(q);
+ finishCheck();
+};
+
+document.getElementById("c").onclick=()=>{
+ reset(); log("=== TEST C: query + delete/recreate ×20 ===");
+ if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
+ for(let i=1;i<=20;i++){
+   const t=makeTex(),f=makeFbo(t);
+   render(f);
+   const q=makeQuery();
+   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+   gl.deleteFramebuffer(f);
+   gl.deleteTexture(t);
+   const p=poll(q);
+   if(i===1||i===20)log("cycle "+i+" available="+p.available+" disjoint="+p.disjoint);
+   gl.deleteQuery(q);
+   if(lost)break;
+ }
+ finishCheck();
+};
+
+document.getElementById("d").onclick=()=>{
+ reset(); log("=== TEST D: query + FBO state churn ×20 ===");
+ if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
+ for(let i=1;i<=20;i++){
+   const t0=makeTex(),t1=makeTex();
+   const f=makeFbo(t0);
+   render(f);
+   const q=makeQuery();
+
+   // Unbind/delete while query work may still be pending.
+   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+   gl.deleteFramebuffer(f);
+   gl.deleteTexture(t0);
+
+   // Rebind a fresh FBO and continue normal work.
+   const f2=makeFbo(t1);
+   render(f2);
+   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+
+   const p=poll(q);
+   if(i===1||i===20)log("cycle "+i+" available="+p.available+" disjoint="+p.disjoint);
+   gl.deleteQuery(q);
+   gl.deleteFramebuffer(f2);
+   gl.deleteTexture(t1);
+   if(lost)break;
+ }
+ finishCheck();
+};
 })();
 </script>
-</body>
-</html>
