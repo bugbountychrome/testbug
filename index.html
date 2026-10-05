@@ -2,67 +2,111 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>Android Installed Apps Boundary</title>
+  <title>FSA Rename Round-Trip Test</title>
 </head>
 
 <body>
 
-<h3>Installed Apps Boundary Test</h3>
-
-<button onclick="testTop()">TEST TOP LEVEL</button>
-<button onclick="testFrame()">TEST CROSS ORIGIN FRAME</button>
+<button onclick="setup()">1. SETUP</button>
+<button onclick="removeOld()">2. REMOVE</button>
+<button onclick="check()">3. CHECK</button>
 
 <pre id="log"></pre>
 
 <script>
+let dir = null;
+let oldFile = null;
+
 function log(x) {
   document.getElementById("log").textContent += x + "\n";
 }
 
-async function testTop() {
-  log("");
-  log("=== TOP LEVEL ===");
-  log("origin: " + location.origin);
-
-  if (!("getInstalledRelatedApps" in navigator)) {
-    log("API: NOT SUPPORTED");
-    return;
-  }
-
-  log("API: SUPPORTED");
+async function setup() {
+  document.getElementById("log").textContent = "";
 
   try {
-    const apps = await navigator.getInstalledRelatedApps();
+    dir = await showDirectoryPicker({
+      mode: "readwrite"
+    });
 
-    log("SUCCESS");
-    log("count: " + apps.length);
+    log("DIRECTORY: OK");
 
-    for (const app of apps) {
-      log(JSON.stringify(app));
-    }
+    oldFile = await dir.getFileHandle("FSA_TEST.txt");
+
+    log("OLD HANDLE: OK");
+    log("permission = " +
+      await oldFile.queryPermission({mode:"read"}));
+
+    const f = await oldFile.getFile();
+    log("OLD CONTENT = " + await f.text());
 
   } catch (e) {
-    log("ERROR: " + e.name);
+    log("SETUP ERROR: " + e.name);
     log(e.message);
   }
 }
 
-function testFrame() {
-  log("");
-  log("=== CROSS ORIGIN FRAME ===");
+async function removeOld() {
+  try {
+    if (!dir) {
+      log("RUN SETUP FIRST");
+      return;
+    }
 
-  const frame = document.createElement("iframe");
+    await dir.removeEntry("FSA_TEST.txt");
 
-  frame.src =
-    "https://example.com/";
+    log("");
+    log("REMOVE: SUCCESS");
+    log("OLD FILE DELETED");
+    log("");
+    log("Sekarang buat file baru:");
+    log("FSA_TEST.txt");
+    log("dengan Termux:");
+    log("RECREATED_12345");
 
-  frame.style.width = "100%";
-  frame.style.height = "100px";
+  } catch (e) {
+    log("REMOVE ERROR: " + e.name);
+    log(e.message);
+  }
+}
 
-  document.body.appendChild(frame);
+async function check() {
+  try {
+    log("");
+    log("=== BEFORE RENAME ===");
 
-  log("iframe created");
-  log("iframe origin: https://example.com");
+    const newFile =
+      await dir.getFileHandle("FSA_TEST.txt");
+
+    log("NEW HANDLE: OK");
+
+    log("new permission = " +
+      await newFile.queryPermission({mode:"read"}));
+
+    const before = await newFile.getFile();
+
+    log("NEW CONTENT = " + await before.text());
+
+    log("");
+    log("=== OLD HANDLE ===");
+
+    try {
+      const old = await oldFile.getFile();
+      log("OLD HANDLE READ = SUCCESS");
+      log("OLD CONTENT = " + await old.text());
+    } catch (e) {
+      log("OLD HANDLE READ = " + e.name);
+    }
+
+    log("");
+    log("Sekarang rename file baru secara eksternal:");
+    log("FSA_TEST.txt -> ROUNDTRIP.txt");
+    log("ROUNDTRIP.txt -> FSA_TEST.txt");
+
+  } catch (e) {
+    log("CHECK ERROR: " + e.name);
+    log(e.message);
+  }
 }
 </script>
 
