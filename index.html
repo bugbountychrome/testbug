@@ -1,40 +1,37 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width">
-<button onclick="start()">START CAMERA + MIC</button>
+
+<h3>Android Intent Boundary Test</h3>
+
+<button onclick="test1()">TEST INTENT</button>
+<button onclick="test2()">TEST VIEW</button>
+
 <pre id="log"></pre>
 
 <script>
 const log = x => {
-  document.querySelector("#log").textContent +=
-    new Date().toISOString() + "  " + x + "\n";
+  document.getElementById("log").textContent +=
+    new Date().toISOString() + " " + x + "\n";
 };
 
-async function start() {
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true
-    });
+function test1() {
+  log("Launching intent URL...");
 
-    log("STREAM STARTED");
-
-    for (const t of s.getTracks()) {
-      log(`${t.kind}: ${t.readyState}, enabled=${t.enabled}`);
-      t.onended = () => log(`${t.kind}: ENDED`);
-      t.onmute = () => log(`${t.kind}: MUTED`);
-      t.onunmute = () => log(`${t.kind}: UNMUTED`);
-    }
-
-    setInterval(() => {
-      log(
-        `visibility=${document.visibilityState} ` +
-        `video=${s.getVideoTracks()[0]?.readyState} ` +
-        `audio=${s.getAudioTracks()[0]?.readyState}`
-      );
-    }, 1000);
-
-  } catch (e) {
-    log(`ERROR ${e.name}: ${e.message}`);
-  }
+  location.href =
+    "intent://example.com/#Intent;" +
+    "scheme=https;" +
+    "action=android.intent.action.VIEW;" +
+    "end";
 }
+
+function test2() {
+  log("Launching normal HTTPS...");
+
+  location.href = "https://example.com/";
+}
+
+window.addEventListener("pagehide", () => log("PAGEHIDE"));
+window.addEventListener("visibilitychange", () =>
+  log("VISIBILITY=" + document.visibilityState)
+);
 </script>
