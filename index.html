@@ -1,165 +1,189 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali PACK_ROW_LENGTH Exact Regression v3</title>
+<title>ANGLE Transform Feedback Validation Regression v1</title>
 <style>
 body{font:14px monospace;background:#111;color:#ddd;padding:12px}
 button{display:block;width:100%;margin:7px 0;padding:12px}
 .ok{color:#8f8}.bad{color:#f88}.info{color:#8cf}
 </style>
-<h3>Mali PACK_ROW_LENGTH — exact regression v3</h3>
+<h3>ANGLE Transform Feedback validation regression v1</h3>
 <div id="info"></div>
-<button onclick="run(1)">TEST 1 — exact ANGLE regression shape</button>
-<button onclick="run(2)">TEST 2 — same row length, 2 rows</button>
-<button onclick="run(3)">TEST 3 — row length + 1</button>
-<button onclick="run(4)">TEST 4 — skip rows + boundary</button>
-<button id="runall" type="button">RUN ALL</button>
+<button id="all" type="button">RUN ALL 4 TESTS</button>
 <pre id="out"></pre>
 <script>
 "use strict";
 
-/*
- * IMPORTANT:
- * This intentionally mirrors the ANGLE regression-test geometry while
- * keeping the allocation bounded for a phone.
- *
- * The original ANGLE regression uses a ~512 MiB PBO because it tests an
- * actual very-large destination offset. This version first tests whether
- * the browser accepts the same stride/validation shape with a smaller
- * logical destination. It does NOT claim to reproduce the original
- * 512 MiB driver condition.
- */
-
-const ROW_LENGTH = 0x07fffffc; // ANGLE regression-test value
-const BPP = 4;
-const ROW_BYTES = ROW_LENGTH * BPP;
-const SMALL_PBO = 16 * 1024 * 1024; // bounded 16 MiB
-const W = 1, H = 2;
-
-function log(s, cls="") {
-  const p=document.createElement("div");
-  p.textContent=s;
-  if(cls)p.className=cls;
-  out.appendChild(p);
+function log(s,cls=""){
+  const d=document.createElement("div"); d.textContent=s;
+  if(cls)d.className=cls; out.appendChild(d);
 }
-function fresh() {
-  const c=document.createElement("canvas");
-  c.width=4;c.height=4;
-  const gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
-  if(!gl) throw Error("WebGL2 unavailable");
+function fresh(){
+  const c=document.createElement("canvas"); c.width=32;c.height=32;
+  const gl=c.getContext("webgl2",{antialias:false});
+  if(!gl)throw Error("WebGL2 unavailable");
   return gl;
 }
-function en(gl,e) {
-  return e===gl.NO_ERROR ? "NO_ERROR" :
-    e===gl.INVALID_ENUM ? "INVALID_ENUM" :
-    e===gl.INVALID_VALUE ? "INVALID_VALUE" :
-    e===gl.INVALID_OPERATION ? "INVALID_OPERATION" :
-    e===gl.OUT_OF_MEMORY ? "OUT_OF_MEMORY" :
-    "0x"+e.toString(16);
+function en(gl,e){
+  return e===gl.NO_ERROR?"NO_ERROR":
+    e===gl.INVALID_ENUM?"INVALID_ENUM":
+    e===gl.INVALID_VALUE?"INVALID_VALUE":
+    e===gl.INVALID_OPERATION?"INVALID_OPERATION":
+    e===gl.INVALID_FRAMEBUFFER_OPERATION?"INVALID_FRAMEBUFFER_OPERATION":
+    e===gl.OUT_OF_MEMORY?"OUT_OF_MEMORY":"0x"+e.toString(16);
 }
 function drain(gl){while(gl.getError()!==gl.NO_ERROR){}}
 
-function run(n) {
+function makeProgram(gl){
+  const vs=gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs,`#version 300 es
+    in vec4 a;
+    out vec4 tf;
+    void main(){ tf=a; gl_Position=a; }`);
+  gl.compileShader(vs);
+  if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))
+    throw Error("VS compile: "+gl.getShaderInfoLog(vs));
+
+  const fs=gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs,`#version 300 es
+    precision highp float;
+    out vec4 c;
+    void main(){c=vec4(1.0);}`);
+  gl.compileShader(fs);
+  if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))
+    throw Error("FS compile: "+gl.getShaderInfoLog(fs));
+
+  const p=gl.createProgram();
+  gl.attachShader(p,vs); gl.attachShader(p,fs);
+  gl.bindAttribLocation(p,0,"a");
+  gl.transformFeedbackVaryings(p,["tf"],gl.INTERLEAVED_ATTRIBS);
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))
+    throw Error("link: "+gl.getProgramInfoLog(p));
+  return p;
+}
+
+function makeBuffer(gl){
+  const b=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  const data=new Float32Array([
+    -1,-1,0,1,  1,-1,0,1,  0,1,0,1
+  ]);
+  gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER,null);
+  return b;
+}
+
+function run(n){
   out.textContent="";
-  let gl=null,pbo=null;
-  try {
-    gl=fresh();
-    drain(gl);
+  let gl=null,prog=null,b=null,tf1=null,tf2=null;
+  try{
+    gl=fresh(); drain(gl);
+    prog=makeProgram(gl); b=makeBuffer(gl);
 
-    // Small deterministic framebuffer.
-    gl.viewport(0,0,4,4);
-    gl.clearColor(0.25,0.5,0.75,1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.finish();
-    drain(gl);
+    tf1=gl.createTransformFeedback();
+    tf2=gl.createTransformFeedback();
 
-    pbo=gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER,SMALL_PBO,gl.STREAM_READ);
+    // TF1 owns the buffer.
+    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf1);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER,0,b);
     let e=gl.getError();
-    if(e!==gl.NO_ERROR) {
-      log("PBO allocation: "+en(gl,e),"bad");
-      return;
-    }
+    if(e!==gl.NO_ERROR)throw Error("bind TF1: "+en(gl,e));
 
-    let rl=ROW_LENGTH, skip=0, x=0, y=0, w=1, h=1;
+    gl.useProgram(prog);
+    gl.enableVertexAttribArray(0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,b);
+    gl.vertexAttribPointer(0,4,gl.FLOAT,false,0,0);
 
-    if(n===2) {
-      h=2;
-    } else if(n===3) {
-      rl=ROW_LENGTH+1;
-    } else if(n===4) {
-      skip=1;
-      h=1;
-    }
-
-    gl.pixelStorei(gl.PACK_ROW_LENGTH,rl);
-    gl.pixelStorei(gl.PACK_SKIP_ROWS,skip);
-    gl.pixelStorei(gl.PACK_SKIP_PIXELS,0);
+    gl.beginTransformFeedback(gl.TRIANGLES);
     e=gl.getError();
-    log("ROW_LENGTH=0x"+rl.toString(16));
-    log("logical row bytes="+(rl*BPP));
-    log("PBO bytes="+SMALL_PBO);
-    log("skipRows="+skip+" read="+w+"x"+h);
+    if(e!==gl.NO_ERROR)throw Error("begin TF: "+en(gl,e));
 
-    if(e!==gl.NO_ERROR) {
-      log("pixelStore: "+en(gl,e),"bad");
-      return;
-    }
-
-    gl.readPixels(x,y,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+    gl.pauseTransformFeedback();
     e=gl.getError();
-    log("readPixels="+en(gl,e));
+    if(e!==gl.NO_ERROR)throw Error("pause TF: "+en(gl,e));
 
-    if(e===gl.NO_ERROR) {
-      gl.finish();
-      const outbuf=new Uint8Array(16);
-      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,outbuf);
-      const e2=gl.getError();
-      log("getBufferSubData="+en(gl,e2));
-      log("first16="+Array.from(outbuf).join(","));
+    if(n===1){
+      // Control: resume while the original TF remains bound.
+      gl.resumeTransformFeedback();
+    }else if(n===2){
+      // Core state-transition case: active/paused TF becomes unbound.
+      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
+      gl.resumeTransformFeedback();
+    }else if(n===3){
+      // Same transition, then attempt the forbidden buffer modification.
+      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
+      gl.bindBuffer(gl.ARRAY_BUFFER,b);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(32),gl.DYNAMIC_DRAW);
+      // We expect validation to reject the modification while TF1 is active.
+    }else{
+      // Critical regression shape: unbind active paused TF, then try
+      // map/write, restore TF1, resume, and issue a draw.
+      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
+      gl.bindBuffer(gl.ARRAY_BUFFER,b);
+      const mapped=gl.mapBufferRange(
+        gl.ARRAY_BUFFER,0,16,
+        gl.MAP_WRITE_BIT|gl.MAP_INVALIDATE_RANGE_BIT
+      );
+      const mapErr=gl.getError();
+      log("mapBufferRange="+en(gl,mapErr));
+      if(mapped) {
+        const u=new Float32Array(mapped.buffer,mapped.byteOffset,4);
+        u[0]=0.1;u[1]=0.2;u[2]=0.3;u[3]=1;
+        gl.unmapBuffer(gl.ARRAY_BUFFER);
+        log("unmapBuffer="+en(gl,gl.getError()));
+      }
+
+      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf1);
+      gl.resumeTransformFeedback();
+      log("resume="+en(gl,gl.getError()));
+
+      gl.drawArrays(gl.TRIANGLES,0,3);
+      log("draw="+en(gl,gl.getError()));
+      gl.endTransformFeedback();
+      log("end="+en(gl,gl.getError()));
     }
 
+    e=gl.getError();
+    log("final getError="+en(gl,e));
+    gl.finish();
     log("contextLost="+gl.isContextLost());
 
-    if(gl.isContextLost()) {
+    if(gl.isContextLost())
       log("UNEXPECTED CONTEXT LOSS","bad");
-    } else if(e===gl.NO_ERROR) {
-      log("PASS — command accepted without context loss","ok");
-    } else {
-      log("No security signal; command rejected/validated","info");
-    }
-  } catch(ex) {
+    else
+      log("PASS — no context loss","ok");
+
+  }catch(ex){
     log("EXCEPTION: "+ex.message,"bad");
-  } finally {
-    try {
-      if(gl) {
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
-        if(pbo) gl.deleteBuffer(pbo);
+  }finally{
+    try{
+      if(gl){
+        gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,null);
+        if(tf1)gl.deleteTransformFeedback(tf1);
+        if(tf2)gl.deleteTransformFeedback(tf2);
+        if(prog)gl.deleteProgram(prog);
+        if(b)gl.deleteBuffer(b);
       }
-    } catch(_){}
+    }catch(_){}
   }
 }
-async function all() {
-  out.textContent="";
-  const b=document.getElementById("runall");
-  b.disabled=true;
-  try {
+
+async function all(){
+  const btn=document.getElementById("all"); btn.disabled=true; out.textContent="";
+  try{
     for(let i=1;i<=4;i++){
+      log("=== TEST "+i+" ===","info");
       run(i);
-      await new Promise(r=>setTimeout(r,500));
+      await new Promise(r=>setTimeout(r,350));
     }
-  } finally {
-    b.disabled=false;
-  }
+  }finally{btn.disabled=false}
 }
-document.getElementById("runall").addEventListener("click", all);
-try {
-  const gl=fresh();
-  info.textContent =
-    "WebGL2="+!!gl+
-    " | renderer="+gl.getParameter(gl.RENDERER)+
-    " | version="+gl.getParameter(gl.VERSION);
-} catch(e) {
-  info.textContent=e.message;
-}
+document.getElementById("all").addEventListener("click",all);
+
+try{
+ const g=fresh();
+ info.textContent="WebGL2="+!!g+
+   " | renderer="+g.getParameter(g.RENDERER)+
+   " | version="+g.getParameter(g.VERSION);
+}catch(e){info.textContent=e.message}
 </script>
