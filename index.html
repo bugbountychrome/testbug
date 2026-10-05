@@ -2,44 +2,56 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
+  <title>FSA Test</title>
 </head>
 
 <body>
 
-<button onclick="setup()">1. SETUP</button>
+<button onclick="setup()">1. SETUP FILE</button>
 <button onclick="removeFile()">2. HANDLE.REMOVE()</button>
 <button onclick="check()">3. CHECK</button>
 
 <pre id="log"></pre>
 
 <script>
-let dirHandle;
-let fileHandle;
+
+let fileHandle = null;
 
 function log(x) {
   document.getElementById("log").textContent += x + "\n";
 }
 
 async function setup() {
+
   document.getElementById("log").textContent = "";
 
   try {
-    fileHandle = await showOpenFilePicker({
+
+    log("=== FILE PICKER SETUP ===");
+
+    const files = await showOpenFilePicker({
       multiple: false,
-      types: [],
-      excludeAcceptAllOption: false
-    }).then(x => x[0]);
+      mode: "readwrite"
+    });
+
+    fileHandle = files[0];
 
     log("FILE HANDLE: OK");
+    log("kind = " + fileHandle.kind);
+    log("name = " + fileHandle.name);
 
     log(
       "read = " +
-      await fileHandle.queryPermission({mode:"read"})
+      await fileHandle.queryPermission({
+        mode: "read"
+      })
     );
 
     log(
       "readwrite = " +
-      await fileHandle.queryPermission({mode:"readwrite"})
+      await fileHandle.queryPermission({
+        mode: "readwrite"
+      })
     );
 
     const file = await fileHandle.getFile();
@@ -47,16 +59,25 @@ async function setup() {
     log("CONTENT = " + await file.text());
 
   } catch (e) {
+
     log("SETUP ERROR: " + e.name);
     log(e.message);
+
   }
 }
 
-async function removeFile() {
-  try {
 
-    log("");
-    log("=== HANDLE.REMOVE ===");
+async function removeFile() {
+
+  if (!fileHandle) {
+    log("ERROR: SETUP FILE terlebih dahulu");
+    return;
+  }
+
+  log("");
+  log("=== HANDLE.REMOVE ===");
+
+  try {
 
     await fileHandle.remove();
 
@@ -70,46 +91,76 @@ async function removeFile() {
   }
 
   try {
+
     log(
       "read after remove = " +
-      await fileHandle.queryPermission({mode:"read"})
+      await fileHandle.queryPermission({
+        mode: "read"
+      })
     );
 
     log(
       "readwrite after remove = " +
-      await fileHandle.queryPermission({mode:"readwrite"})
+      await fileHandle.queryPermission({
+        mode: "readwrite"
+      })
     );
+
   } catch (e) {
-    log("permission check error: " + e.name);
+
+    log("PERMISSION ERROR: " + e.name);
+
   }
 
   try {
-    await fileHandle.getFile();
+
+    const file = await fileHandle.getFile();
+
     log("OLD HANDLE READ: SUCCESS");
+    log("CONTENT = " + await file.text());
+
   } catch (e) {
+
     log("OLD HANDLE READ: " + e.name);
+
   }
 
-  log("");
-  log("Sekarang recreate FSA_TEST.txt dari Termux.");
 }
+
 
 async function check() {
 
-  try {
+  if (!fileHandle) {
+    log("ERROR: SETUP FILE terlebih dahulu");
+    return;
+  }
 
-    log("");
-    log("=== CHECK ===");
+  log("");
+  log("=== CHECK ===");
+
+  try {
 
     log(
       "old read = " +
-      await fileHandle.queryPermission({mode:"read"})
+      await fileHandle.queryPermission({
+        mode: "read"
+      })
     );
 
     log(
       "old readwrite = " +
-      await fileHandle.queryPermission({mode:"readwrite"})
+      await fileHandle.queryPermission({
+        mode: "readwrite"
+      })
     );
+
+  } catch (e) {
+
+    log("PERMISSION ERROR: " + e.name);
+
+  }
+
+  try {
 
     const file = await fileHandle.getFile();
 
@@ -122,7 +173,9 @@ async function check() {
     log(e.message);
 
   }
+
 }
+
 </script>
 
 </body>
