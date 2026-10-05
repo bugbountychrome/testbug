@@ -1,69 +1,40 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Edge InPrivate Permission Test</title>
-</head>
+<!doctype html>
+<meta name="viewport" content="width=device-width">
+<button onclick="start()">START CAMERA + MIC</button>
+<pre id="log"></pre>
 
-<body>
-  <h2>Edge Location Permission Test</h2>
+<script>
+const log = x => {
+  document.querySelector("#log").textContent +=
+    new Date().toISOString() + "  " + x + "\n";
+};
 
-  <button onclick="testLocation()">TEST LOCATION</button>
+async function start() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
 
-  <pre id="result">Belum dites.</pre>
+    log("STREAM STARTED");
 
-  <script>
-    async function testLocation() {
-      const result = document.getElementById("result");
-
-      result.textContent = "Checking permission...\n";
-
-      if (!navigator.geolocation) {
-        result.textContent += "Geolocation API NOT available";
-        return;
-      }
-
-      try {
-        const permission = await navigator.permissions.query({
-          name: "geolocation"
-        });
-
-        result.textContent +=
-          "Permission state: " + permission.state + "\n\n";
-
-        permission.onchange = () => {
-          result.textContent +=
-            "Permission changed → " + permission.state + "\n";
-        };
-
-        navigator.geolocation.getCurrentPosition(
-          position => {
-            result.textContent +=
-              "SUCCESS\n" +
-              "Latitude: " + position.coords.latitude + "\n" +
-              "Longitude: " + position.coords.longitude + "\n" +
-              "Accuracy: " + position.coords.accuracy + "m\n";
-          },
-
-          error => {
-            result.textContent +=
-              "ERROR\n" +
-              "Code: " + error.code + "\n" +
-              "Message: " + error.message + "\n";
-          },
-
-          {
-            enableHighAccuracy: false,
-            timeout: 10000,
-            maximumAge: 0
-          }
-        );
-
-      } catch (e) {
-        result.textContent +=
-          "EXCEPTION: " + e + "\n";
-      }
+    for (const t of s.getTracks()) {
+      log(`${t.kind}: ${t.readyState}, enabled=${t.enabled}`);
+      t.onended = () => log(`${t.kind}: ENDED`);
+      t.onmute = () => log(`${t.kind}: MUTED`);
+      t.onunmute = () => log(`${t.kind}: UNMUTED`);
     }
-  </script>
-</body>
-</html>
+
+    setInterval(() => {
+      log(
+        `visibility=${document.visibilityState} ` +
+        `video=${s.getVideoTracks()[0]?.readyState} ` +
+        `audio=${s.getAudioTracks()[0]?.readyState}`
+      );
+    }, 1000);
+
+  } catch (e) {
+    log(`ERROR ${e.name}: ${e.message}`);
+  }
+}
+</script>
