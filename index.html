@@ -1,82 +1,149 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Chrome Android MediaStream lifecycle regression</title>
+<title>MediaStream lifecycle race v2</title>
 <style>
 body{font:15px system-ui,sans-serif;padding:16px}
 button{font-size:17px;padding:10px;margin:4px}
-#log{white-space:pre-wrap;background:#eee;padding:10px;border-radius:8px}
+#log{white-space:pre-wrap;background:#eee;padding:10px;border-radius:8px;max-height:55vh;overflow:auto}
+video{width:1px;height:1px;position:fixed;left:-10px;top:-10px}
 </style>
-<h3>MediaStream lifecycle race test</h3>
+
+<h3>MediaStream / VideoSource lifecycle race v2</h3>
 <button id="start">START</button>
 <button id="stop">STOP</button>
 <div id="log"></div>
+
 <script>
-const L=[];
-const out=document.querySelector('#log');
-function log(x){L.push(new Date().toISOString()+" "+x);out.textContent=L.slice(-80).join("\n");}
+const out=document.querySelector("#log");
+let lines=[], running=false, iteration=0, base=null, videos=new Set(), pcs=new Set();
 
-let stream=null, pc=null, running=false, timer=null, n=0;
-
-async function cycle(){
-  if(!running) return;
-  try {
-    // Repeatedly create native MediaStream/MediaStreamTrack objects,
-    // attach callbacks, then tear them down while camera callbacks
-    // may still be in flight.
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio:true,
-      video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}}
-    });
-
-    const tracks=[...stream.getTracks()];
-    for(const t of tracks){
-      t.onended=()=>log("track ended "+t.kind);
-      t.onmute=()=>log("track mute "+t.kind);
-      t.onunmute=()=>log("track unmute "+t.kind);
-    }
-
-    pc=new RTCPeerConnection();
-    for(const t of tracks) pc.addTrack(t,stream);
-
-    // Force negotiation/native WebRTC activity.
-    const offer=await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // Teardown while native callbacks/tasks may still be queued.
-    for(const t of tracks) t.stop();
-    stream.getTracks().forEach(t=>{t.onended=null;t.onmute=null;t.onunmute=null});
-    stream=null;
-
-    pc.close();
-    pc=null;
-
-    n++;
-    if(n%5===0) log("cycles="+n+" alive");
-  } catch(e) {
-    log("exception: "+e.name+" "+e.message);
-    try{if(stream) stream.getTracks().forEach(t=>t.stop())}catch(_){}
-    try{if(pc) pc.close()}catch(_){}
-    stream=null; pc=null;
-  }
-
-  if(running) timer=setTimeout(cycle,0);
+function log(s){
+  lines.push(new Date().toISOString()+" "+s);
+  if(lines.length>120) lines.shift();
+  out.textContent=lines.join("\\n");
 }
 
-document.querySelector('#start').onclick=()=>{
+function cleanupVideo(v){
+  try { v.pause(); } catch(e){}
+  try { v.srcObject=null; } catch(e){}
+  try { v.remove(); } catch(e){}
+  videos.delete(v);
+}
+
+async function stressOne() {
+  // Clone the real camera track repeatedly. This keeps the same native
+  // VideoSource/capturer underneath while JS wrappers are created/destroyed.
+  const original=base.getVideoTracks()[0];
+  if(!original) throw new Error("no video track");
+
+  const clones=[];
+  for(let i=0;i<6;i++){
+    const c=original.clone();
+    clones.push(c);
+
+    const v=document.createElement("video");
+    v.autoplay=true;
+    v.muted=true;
+    v.playsInline=true;
+    v.srcObject=new MediaStream([c]);
+    document.body.appendChild(v);
+    videos.add(v);
+
+    // Start HTMLMediaElement consumption so frames/capturer callbacks flow.
+    try { await v.play(); } catch(e) {}
+
+    c.onended=()=>log("clone ended");
+    c.onmute=()=>{};
+    c.onunmute=()=>{};
+  }
+
+  // Exercise WebRTC's track/source bookkeeping while the capturer is active.
+  const localPCs=[];
+  for(let i=0;i<3;i++){
+    const pc=new RTCPeerConnection();
+    pcs.add(pc);
+    localPCs.push(pc);
+
+    for(const c of clones){
+      try { pc.addTrack(c, new MediaStream([c])); } catch(e) {}
+    }
+
+    try {
+      const offer=await pc.createOffer();
+      await pc.setLocalDescription(offer);
+    } catch(e) {}
+  }
+
+  // Change capture constraints while wrappers and sinks exist.
+  try {
+    await original.applyConstraints({
+      width:{ideal:320 + (iteration%3)*160},
+      height:{ideal:240 + (iteration%3)*120},
+      frameRate:{ideal:15 + (iteration%2)*15}
+    });
+  } catch(e) {}
+
+  // Teardown wrappers while native capture is still alive.
+  for(const pc of localPCs){
+    try { pc.getSenders().forEach(s=>{try{s.replaceTrack(null)}catch(e){}}); }catch(e){}
+    try { pc.close(); } catch(e){}
+    pcs.delete(pc);
+  }
+
+  for(const c of clones){
+    try { c.stop(); } catch(e){}
+  }
+
+  for(const v of [...videos]) cleanupVideo(v);
+
+  // Force a fresh set of wrappers over the same underlying source.
+  try {
+    original.enabled=false;
+    await new Promise(r=>setTimeout(r,0));
+    original.enabled=true;
+  } catch(e) {}
+
+  iteration++;
+  if(iteration%5===0) log("iterations="+iteration+" native camera source still active");
+}
+
+async function loop(){
+  while(running){
+    try {
+      await stressOne();
+    } catch(e) {
+      log("EXCEPTION "+e.name+": "+e.message);
+    }
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
+document.querySelector("#start").onclick=async()=>{
   if(running)return;
   if(!navigator.mediaDevices?.getUserMedia){
     log("getUserMedia unavailable"); return;
   }
-  running=true;n=0;log("START origin="+location.origin);
-  cycle();
+  try {
+    log("requesting camera...");
+    base=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}},
+      audio:false
+    });
+    log("camera granted; track="+base.getVideoTracks()[0].readyState);
+    running=true;
+    iteration=0;
+    loop();
+  } catch(e) {
+    log("START ERROR "+e.name+": "+e.message);
+  }
 };
 
-document.querySelector('#stop').onclick=()=>{
+document.querySelector("#stop").onclick=()=>{
   running=false;
-  clearTimeout(timer);
-  try{if(stream)stream.getTracks().forEach(t=>t.stop())}catch(_){}
-  try{if(pc)pc.close()}catch(_){}
-  stream=null;pc=null;
-  log("STOP cycles="+n);
+  for(const pc of [...pcs]){try{pc.close()}catch(e){}}
+  for(const v of [...videos])cleanupVideo(v);
+  try{base?.getTracks().forEach(t=>t.stop())}catch(e){}
+  base=null;
+  log("STOP iterations="+iteration);
 };
 </script>
