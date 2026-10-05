@@ -1,94 +1,118 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Mali ReadPixels Clip/Pack-State v1</title>
+<title>ANGLE GL Vertex/VAO Buffer Lifetime v1</title>
 <pre id=o>starting...</pre>
 <script>
 const out=document.getElementById("o");
-function log(s){out.textContent+=s+"\n"}
-function hex(v){return "0x"+v.toString(16)}
-function check(gl,name,fn){
+const log=s=>out.textContent+=s+"\n";
+function make(){
+  const c=document.createElement("canvas"); c.width=64;c.height=64;
+  return c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
+}
+function fillVertex(gl, buf, n, seed){
+  const a=new Float32Array(n*2);
+  for(let i=0;i<n;i++){ a[i*2]=-0.9+1.8*(i/(n-1)); a[i*2+1]=((seed+i)%17)/16*1.6-0.8; }
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,a,gl.DYNAMIC_DRAW);
+}
+function setupVAO(gl, vao, buf){
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0,2,gl.FLOAT,false,8,0);
+}
+function draw(gl){
+  gl.drawArrays(gl.POINTS,0,8);
+  return gl.getError();
+}
+function test(gl,name,fn){
   try{
-    gl.getError();
-    fn();
+    gl.getError(); fn();
     const e=gl.getError();
-    log(name+": "+(e===gl.NO_ERROR?"PASS":"GL_ERROR "+hex(e)));
+    log(name+": "+(e===gl.NO_ERROR?"PASS":"GL_ERROR 0x"+e.toString(16)));
   }catch(e){log(name+": EXCEPTION "+e)}
 }
-function makeGL(){
-  const c=document.createElement("canvas");
-  c.width=32;c.height=32;
-  const gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
-  if(!gl){log("NO WEBGL2");return null}
-  return gl;
-}
-function sentinelTest(gl,name,area,skipRows,skipPixels,rowLength){
-  const w=area[2], h=area[3], bpp=4;
-  const stride=(rowLength||w)*bpp;
-  const base=256;
-  const needed=base + skipRows*stride + skipPixels*bpp + h*stride + 256;
-  const pbo=gl.createBuffer();
-  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
-  gl.bufferData(gl.PIXEL_PACK_BUFFER,needed,gl.STREAM_READ);
-  const before=new Uint8Array(needed); before.fill(0xA5);
-  gl.bufferSubData(gl.PIXEL_PACK_BUFFER,0,before);
-
-  gl.pixelStorei(gl.PACK_ALIGNMENT,1);
-  gl.pixelStorei(gl.PACK_ROW_LENGTH,rowLength);
-  gl.pixelStorei(gl.PACK_SKIP_ROWS,skipRows);
-  gl.pixelStorei(gl.PACK_SKIP_PIXELS,skipPixels);
-
-  gl.readPixels(area[0],area[1],area[2],area[3],gl.RGBA,gl.UNSIGNED_BYTE,base);
-
-  const err=gl.getError();
-  let data=new Uint8Array(needed);
-  gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,data);
-
-  // Detect writes outside the expected destination envelope.
-  const lo=base + skipRows*stride + skipPixels*bpp;
-  const hi=lo + h*stride;
-  let outside=0, inside=0;
-  for(let i=0;i<data.length;i++){
-    if(data[i]!==0xA5){
-      if(i<lo || i>=hi) outside++;
-      else inside++;
-    }
-  }
-  log(name+": "+(err===gl.NO_ERROR?"NO_ERROR":"ERR "+hex(err))+
-      " inside="+inside+" outside="+outside+
-      " range=["+lo+","+hi+")");
-  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
-  gl.deleteBuffer(pbo);
-}
-
-const gl=makeGL();
-if(gl){
-  gl.viewport(0,0,32,32);
-  gl.clearColor(0.25,0.5,0.75,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
+const gl=make();
+if(!gl){log("NO WEBGL2");}
+else{
   log("WebGL2 OK");
   log("renderer="+gl.getParameter(gl.RENDERER));
   log("version="+gl.getParameter(gl.VERSION));
+  gl.viewport(0,0,64,64);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // A: left/top clipping + skip state, small row length.
-  check(gl,"A",()=>sentinelTest(gl,"A clip-left/top + skip",[-8,-6,16,16],2,3,20));
-
-  // B: clipping on right/bottom while preserving original row stride.
-  check(gl,"B",()=>sentinelTest(gl,"B clip-right/bottom + skip",[24,24,16,16],3,2,24));
-
-  // C: both-side clipping and row-length == requested width.
-  check(gl,"C",()=>sentinelTest(gl,"C both clip + tight rowLength",[-4,24,12,12],1,1,12));
-
-  // D: state churn between valid reads; catches stale ANGLE/backend PACK state.
-  check(gl,"D",()=>{
-    sentinelTest(gl,"D1 clipped",[-6,8,14,14],1,2,18);
-    sentinelTest(gl,"D2 unclipped",[4,4,12,12],0,0,16);
-    sentinelTest(gl,"D3 clipped again",[28,-5,12,14],2,1,20);
+  // A: Reallocate an active ARRAY_BUFFER while another VAO is bound.
+  test(gl,"A active-buffer resize + other VAO",()=>{
+    const a=gl.createBuffer(), b=gl.createBuffer();
+    const va=gl.createVertexArray(), vb=gl.createVertexArray();
+    fillVertex(gl,a,8,1); fillVertex(gl,b,8,7);
+    setupVAO(gl,va,a); setupVAO(gl,vb,b);
+    gl.bindVertexArray(va); draw(gl);
+    gl.bindVertexArray(vb);
+    gl.bindBuffer(gl.ARRAY_BUFFER,a);
+    gl.bufferData(gl.ARRAY_BUFFER,1024,gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(va); draw(gl);
+    gl.deleteBuffer(a); gl.deleteBuffer(b); gl.deleteVertexArray(va); gl.deleteVertexArray(vb);
   });
 
-  gl.pixelStorei(gl.PACK_ROW_LENGTH,0);
-  gl.pixelStorei(gl.PACK_SKIP_ROWS,0);
-  gl.pixelStorei(gl.PACK_SKIP_PIXELS,0);
+  // B: ELEMENT_ARRAY_BUFFER lifetime + VAO switch/rebind.
+  test(gl,"B index-buffer resize + VAO switch",()=>{
+    const v=gl.createBuffer(), i=gl.createBuffer();
+    const va=gl.createVertexArray(), vb=gl.createVertexArray();
+    const verts=new Float32Array([-1,-1,1,-1,-1,1,1,1]);
+    gl.bindBuffer(gl.ARRAY_BUFFER,v); gl.bufferData(gl.ARRAY_BUFFER,verts,gl.STATIC_DRAW);
+    gl.bindVertexArray(va); gl.bindBuffer(gl.ARRAY_BUFFER,v);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,8,0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,i);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array([0,1,2,2,1,3]),gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(vb);
+    gl.bindVertexArray(va); gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);
+    gl.bindVertexArray(vb);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,i);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,512,gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(va); gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);
+    gl.deleteBuffer(v); gl.deleteBuffer(i); gl.deleteVertexArray(va); gl.deleteVertexArray(vb);
+  });
+
+  // C: bufferSubData after shrink/grow while VAO remains configured.
+  test(gl,"C shrink/grow + subData + draw",()=>{
+    const b=gl.createBuffer(), vao=gl.createVertexArray();
+    setupVAO(gl,vao,b);
+    gl.bindBuffer(gl.ARRAY_BUFFER,b);
+    gl.bufferData(gl.ARRAY_BUFFER,8*8,gl.DYNAMIC_DRAW);
+    gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array(16));
+    gl.drawArrays(gl.POINTS,0,8);
+    gl.bufferData(gl.ARRAY_BUFFER,64,gl.DYNAMIC_DRAW);
+    gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array(16));
+    gl.bufferData(gl.ARRAY_BUFFER,4096,gl.DYNAMIC_DRAW);
+    gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array(16));
+    gl.drawArrays(gl.POINTS,0,8);
+    gl.deleteBuffer(b); gl.deleteVertexArray(vao);
+  });
+
+  // D: repeated VAO/buffer churn with a stable valid draw oracle.
+  test(gl,"D VAO/buffer churn x32",()=>{
+    const bufs=[], vaos=[];
+    for(let k=0;k<32;k++){
+      const b=gl.createBuffer(), v=gl.createVertexArray();
+      bufs.push(b); vaos.push(v);
+      const data=new Float32Array(16);
+      for(let j=0;j<data.length;j++) data[j]=((j+k)%9)/8-0.5;
+      gl.bindVertexArray(v); gl.bindBuffer(gl.ARRAY_BUFFER,b);
+      gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,8,0);
+      gl.drawArrays(gl.POINTS,0,8);
+      if(k&1){
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER,b);
+        gl.bufferData(gl.ARRAY_BUFFER,128+k*16,gl.DYNAMIC_DRAW);
+        gl.bindVertexArray(v);
+        gl.drawArrays(gl.POINTS,0,8);
+      }
+    }
+    for(const v of vaos) gl.deleteVertexArray(v);
+    for(const b of bufs) gl.deleteBuffer(b);
+  });
   log("DONE");
 }
 </script>
