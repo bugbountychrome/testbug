@@ -3,17 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali / ANGLE WebGL2 regression diagnostic v4</title>
+<title>Mali / ANGLE WebGL2 baseline diagnostic v5</title>
 <style>
 body{background:#111;color:#eee;font:15px monospace;padding:16px;line-height:1.4}
 button{font:inherit;padding:12px 16px;margin:4px 4px 10px 0}
 pre{white-space:pre-wrap;word-break:break-word}
-.pass{color:#9f9}.fail{color:#f88}.info{color:#9cf}
 </style>
 </head>
 <body>
-<h2>Mali / ANGLE WebGL2 regression diagnostic v4</h2>
-<p>Benign diagnostic. It only tests framebuffer completeness and blit behavior.</p>
+<h2>Mali / ANGLE WebGL2 baseline diagnostic v5</h2>
+<p>Benign diagnostic. First establishes valid WebGL2 FBO baselines, then tests BASE_LEVEL and blit.</p>
 <button id="run">Run diagnostic</button>
 <pre id="out">Ready.</pre>
 
@@ -21,34 +20,60 @@ pre{white-space:pre-wrap;word-break:break-word}
 "use strict";
 
 const out = document.getElementById("out");
-function log(s=""){ out.textContent += s + "\n"; console.log(s); }
-function clear(){ out.textContent = ""; }
+const log = s => { out.textContent += s + "\n"; console.log(s); };
+const clear = () => out.textContent = "";
 
-function errorName(gl, e) {
-  const m = {
-    0x0000:"NO_ERROR",
-    0x0500:"INVALID_ENUM",
-    0x0501:"INVALID_VALUE",
-    0x0502:"INVALID_OPERATION",
-    0x0503:"OUT_OF_MEMORY",
-    0x0506:"INVALID_FRAMEBUFFER_OPERATION",
-    0x8CD5:"FRAMEBUFFER_INCOMPLETE_ATTACHMENT",
-    0x8CD6:"FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT",
-    0x8CD7:"FRAMEBUFFER_INCOMPLETE_DIMENSIONS",
-    0x8CDD:"FRAMEBUFFER_UNSUPPORTED",
-    0x8219:"FRAMEBUFFER_INCOMPLETE_MULTISAMPLE"
+function statusName(gl,s){
+  const m={
+    [gl.FRAMEBUFFER_COMPLETE]:"FRAMEBUFFER_COMPLETE",
+    [gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT]:"FRAMEBUFFER_INCOMPLETE_ATTACHMENT",
+    [gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT]:"FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT",
+    [gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS]:"FRAMEBUFFER_INCOMPLETE_DIMENSIONS",
+    [gl.FRAMEBUFFER_UNSUPPORTED]:"FRAMEBUFFER_UNSUPPORTED"
   };
-  return m[e] || ("0x" + e.toString(16));
+  return m[s] || ("0x"+s.toString(16));
 }
 
-function drain(gl) {
-  const a=[];
-  let e;
-  while((e=gl.getError()) !== gl.NO_ERROR) a.push(errorName(gl,e));
+function errName(gl,e){
+  const m={
+    [gl.NO_ERROR]:"NO_ERROR",
+    [gl.INVALID_ENUM]:"INVALID_ENUM",
+    [gl.INVALID_VALUE]:"INVALID_VALUE",
+    [gl.INVALID_OPERATION]:"INVALID_OPERATION",
+    [gl.OUT_OF_MEMORY]:"OUT_OF_MEMORY",
+    [gl.INVALID_FRAMEBUFFER_OPERATION]:"INVALID_FRAMEBUFFER_OPERATION"
+  };
+  return m[e] || ("0x"+e.toString(16));
+}
+
+function drain(gl){
+  const a=[]; let e;
+  while((e=gl.getError())!==gl.NO_ERROR)a.push(errName(gl,e));
   return a;
 }
 
-function allocTexture(gl, size=64, levels=4) {
+/*
+ * Conservative texture allocation:
+ * - RGBA / UNSIGNED_BYTE
+ * - no mipmap filtering requirement
+ * - explicitly allocate the exact level being attached
+ */
+function tex(gl,w,h){
+  const t=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D,0,gl.RGBA,w,h,0,
+    gl.RGBA,gl.UNSIGNED_BYTE,null
+  );
+  gl.bindTexture(gl.TEXTURE_2D,null);
+  return t;
+}
+
+function mipTex(gl,baseW,baseH,levels){
   const t=gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST_MIPMAP_NEAREST);
@@ -56,10 +81,10 @@ function allocTexture(gl, size=64, levels=4) {
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
 
-  let w=size,h=size;
+  let w=baseW,h=baseH;
   for(let l=0;l<levels;l++){
     gl.texImage2D(
-      gl.TEXTURE_2D,l,gl.RGBA8,w,h,0,
+      gl.TEXTURE_2D,l,gl.RGBA,w,h,0,
       gl.RGBA,gl.UNSIGNED_BYTE,null
     );
     w=Math.max(1,w>>1);
@@ -69,190 +94,160 @@ function allocTexture(gl, size=64, levels=4) {
   return t;
 }
 
-function makeFbo(gl){
-  return gl.createFramebuffer();
+function makeFbo(gl, attachments){
+  const f=gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+
+  for(const a of attachments){
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,a.attachment,
+      gl.TEXTURE_2D,a.texture,a.level
+    );
+  }
+
+  const buffers=attachments.map(a=>a.attachment);
+  gl.drawBuffers(buffers);
+  return f;
 }
 
-function attach(gl,fbo,attachment,tex,level){
-  gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,attachment,gl.TEXTURE_2D,tex,level
-  );
-}
-
-function status(gl){
-  return gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-}
-
-function result(name, ok, detail=""){
-  log((ok ? "[PASS] " : "[FAIL] ") + name + (detail ? " — " + detail : ""));
+function check(gl,name){
+  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  const ok=s===gl.FRAMEBUFFER_COMPLETE;
+  log((ok?"[PASS] ":"[FAIL] ")+name+" — "+statusName(gl,s));
   return ok;
 }
 
-/*
- * Diagnostic matrix:
- * A: baseline, one attachment at level 0
- * B: one attachment at level 1, BASE_LEVEL=1
- * C: two attachments, both level 1, BASE_LEVEL=1
- * D: two attachments, one BASE_LEVEL=1 and one BASE_LEVEL=0
- * E: same as C, then actual blit
- *
- * Each case is isolated in fresh textures/FBOs.
- */
-function runCases(gl){
-  log("=== FRAMEBUFFER DIAGNOSTIC MATRIX ===");
+function deleteFbo(gl,f,...textures){
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.deleteFramebuffer(f);
+  for(const t of textures)gl.deleteTexture(t);
+  drain(gl);
+}
 
-  // A
-  {
-    const tex=allocTexture(gl);
-    const f=makeFbo(gl);
-    attach(gl,f,gl.COLOR_ATTACHMENT0,tex,0);
-    const s=status(gl);
-    result(
-      "A. single attachment / level 0",
-      s===gl.FRAMEBUFFER_COMPLETE,
-      "status="+errorName(gl,s)
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.deleteFramebuffer(f); gl.deleteTexture(tex);
-    drain(gl);
-  }
+function caseA(gl){
+  log("\n=== A: conservative single attachment baseline ===");
+  const t=tex(gl,64,64);
+  const f=makeFbo(gl,[{attachment:gl.COLOR_ATTACHMENT0,texture:t,level:0}]);
+  const ok=check(gl,"single 64x64 RGBA/UNSIGNED_BYTE level 0");
+  deleteFbo(gl,f,t);
+  return ok;
+}
 
-  // B
-  {
-    const tex=allocTexture(gl);
-    const f=makeFbo(gl);
-    gl.bindTexture(gl.TEXTURE_2D,tex);
+function caseB(gl){
+  log("\n=== B: explicit level-1 attachment baseline ===");
+  const t=mipTex(gl,64,64,2);
+  const f=makeFbo(gl,[{attachment:gl.COLOR_ATTACHMENT0,texture:t,level:1}]);
+  const ok=check(gl,"single 32x32 mip level 1");
+  deleteFbo(gl,f,t);
+  return ok;
+}
+
+function caseC(gl){
+  log("\n=== C: two equal-size color attachments ===");
+  const a=tex(gl,32,32);
+  const b=tex(gl,32,32);
+  const f=makeFbo(gl,[
+    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:0},
+    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:0}
+  ]);
+  const ok=check(gl,"two 32x32 color attachments");
+  deleteFbo(gl,f,a,b);
+  return ok;
+}
+
+function caseD(gl){
+  log("\n=== D: BASE_LEVEL=1 on one 64x64 texture ===");
+  const t=mipTex(gl,64,64,2);
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+
+  const f=makeFbo(gl,[{
+    attachment:gl.COLOR_ATTACHMENT0,texture:t,level:1
+  }]);
+
+  const ok=check(gl,"single attachment level 1 + BASE_LEVEL=1");
+  deleteFbo(gl,f,t);
+  return ok;
+}
+
+function caseE(gl){
+  log("\n=== E: two attachments + BASE_LEVEL=1 ===");
+  const a=mipTex(gl,64,64,2);
+  const b=mipTex(gl,64,64,2);
+
+  for(const t of [a,b]){
+    gl.bindTexture(gl.TEXTURE_2D,t);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-    gl.bindTexture(gl.TEXTURE_2D,null);
-
-    attach(gl,f,gl.COLOR_ATTACHMENT0,tex,1);
-    const s=status(gl);
-    result(
-      "B. single attachment / level 1 / BASE_LEVEL=1",
-      s===gl.FRAMEBUFFER_COMPLETE,
-      "status="+errorName(gl,s)
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.deleteFramebuffer(f); gl.deleteTexture(tex);
-    drain(gl);
   }
+  gl.bindTexture(gl.TEXTURE_2D,null);
 
-  // C
-  {
-    const a=allocTexture(gl), b=allocTexture(gl);
-    const f=makeFbo(gl);
+  const f=makeFbo(gl,[
+    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:1},
+    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:1}
+  ]);
 
-    for(const t of [a,b]){
-      gl.bindTexture(gl.TEXTURE_2D,t);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-    }
-    gl.bindTexture(gl.TEXTURE_2D,null);
+  const ok=check(gl,"two 32x32 attachments + BASE_LEVEL=1");
+  deleteFbo(gl,f,a,b);
+  return ok;
+}
 
-    attach(gl,f,gl.COLOR_ATTACHMENT0,a,1);
-    attach(gl,f,gl.COLOR_ATTACHMENT1,b,1);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+function caseF(gl){
+  log("\n=== F: valid source/destination + glBlitFramebuffer ===");
 
-    const s=status(gl);
-    result(
-      "C. two attachments / both level 1 / both BASE_LEVEL=1",
-      s===gl.FRAMEBUFFER_COMPLETE,
-      "status="+errorName(gl,s)
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.deleteFramebuffer(f); gl.deleteTexture(a); gl.deleteTexture(b);
-    drain(gl);
-  }
+  const srcTex=mipTex(gl,64,64,2);
+  const a=mipTex(gl,64,64,2);
+  const b=mipTex(gl,64,64,2);
 
-  // D
-  {
-    const a=allocTexture(gl), b=allocTexture(gl);
-    const f=makeFbo(gl);
-
-    gl.bindTexture(gl.TEXTURE_2D,a);
+  for(const t of [a,b]){
+    gl.bindTexture(gl.TEXTURE_2D,t);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-
-    gl.bindTexture(gl.TEXTURE_2D,b);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
-    gl.bindTexture(gl.TEXTURE_2D,null);
-
-    attach(gl,f,gl.COLOR_ATTACHMENT0,a,1);
-    attach(gl,f,gl.COLOR_ATTACHMENT1,b,0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
-
-    const s=status(gl);
-    result(
-      "D. mixed BASE_LEVEL / attachment levels",
-      s===gl.FRAMEBUFFER_COMPLETE,
-      "status="+errorName(gl,s)
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.deleteFramebuffer(f); gl.deleteTexture(a); gl.deleteTexture(b);
-    drain(gl);
   }
+  gl.bindTexture(gl.TEXTURE_2D,null);
 
-  // E
-  {
-    const srcTex=allocTexture(gl);
-    const a=allocTexture(gl), b=allocTexture(gl);
-    const src=makeFbo(gl), dst=makeFbo(gl);
+  const src=makeFbo(gl,[{
+    attachment:gl.COLOR_ATTACHMENT0,texture:srcTex,level:1
+  }]);
 
-    attach(gl,src,gl.COLOR_ATTACHMENT0,srcTex,1);
+  const dst=makeFbo(gl,[
+    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:1},
+    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:1}
+  ]);
 
-    for(const t of [a,b]){
-      gl.bindTexture(gl.TEXTURE_2D,t);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-    }
-    gl.bindTexture(gl.TEXTURE_2D,null);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
+  const srcStatus=gl.checkFramebufferStatus(gl.READ_FRAMEBUFFER);
 
-    attach(gl,dst,gl.COLOR_ATTACHMENT0,a,1);
-    attach(gl,dst,gl.COLOR_ATTACHMENT1,b,1);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
+  const dstStatus=gl.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER);
 
-    const dstStatus=status(gl);
-    const dstOK=dstStatus===gl.FRAMEBUFFER_COMPLETE;
+  log("source:      "+statusName(gl,srcStatus));
+  log("destination: "+statusName(gl,dstStatus));
 
-    if(!dstOK){
-      result(
-        "E. multi-attachment + BASE_LEVEL + blit",
-        false,
-        "destination status="+errorName(gl,dstStatus)
-      );
-    }else{
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
-
-      drain(gl);
-      let threw=false;
-      try{
-        for(let i=0;i<50;i++){
-          gl.blitFramebuffer(
-            0,0,32,32,
-            0,0,32,32,
-            gl.COLOR_BUFFER_BIT,
-            gl.NEAREST
-          );
-        }
-        gl.flush();
-        gl.finish();
-      }catch(e){
-        threw=true;
-        log("[FAIL] E exception: "+e);
-      }
-
-      const errors=drain(gl);
-      result(
-        "E. multi-attachment + BASE_LEVEL + blit",
-        !threw && errors.length===0,
-        errors.length ? errors.join(", ") : "no GL errors"
+  let ok=false;
+  if(srcStatus===gl.FRAMEBUFFER_COMPLETE &&
+     dstStatus===gl.FRAMEBUFFER_COMPLETE){
+    drain(gl);
+    for(let i=0;i<50;i++){
+      gl.blitFramebuffer(
+        0,0,32,32,
+        0,0,32,32,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST
       );
     }
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.deleteFramebuffer(src); gl.deleteFramebuffer(dst);
-    gl.deleteTexture(srcTex); gl.deleteTexture(a); gl.deleteTexture(b);
-    drain(gl);
+    gl.finish();
+    const errors=drain(gl);
+    ok=errors.length===0;
+    log(ok
+      ? "[PASS] glBlitFramebuffer — no GL errors"
+      : "[FAIL] glBlitFramebuffer — "+errors.join(", "));
+  }else{
+    log("[SKIP] glBlitFramebuffer — source/destination FBO not complete");
   }
+
+  deleteFbo(gl,src,srcTex);
+  deleteFbo(gl,dst,a,b);
+  return ok;
 }
 
 function run(){
@@ -277,7 +272,6 @@ function run(){
   log("Vendor:   "+gl.getParameter(gl.VENDOR));
   log("Version:  "+gl.getParameter(gl.VERSION));
   log("GLSL:     "+gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
-  log("");
 
   canvas.addEventListener("webglcontextlost",e=>{
     e.preventDefault();
@@ -287,18 +281,23 @@ function run(){
     log("[!!!] WEBGL CONTEXT RESTORED");
   });
 
+  const results=[];
   try{
-    runCases(gl);
+    results.push(["A",caseA(gl)]);
+    results.push(["B",caseB(gl)]);
+    results.push(["C",caseC(gl)]);
+    results.push(["D",caseD(gl)]);
+    results.push(["E",caseE(gl)]);
+    results.push(["F",caseF(gl)]);
   }catch(e){
-    log("[!!!] Diagnostic aborted: "+(e.stack||e));
+    log("\n[!!!] Diagnostic aborted: "+(e.stack||e));
   }
 
-  log("");
-  log("=== SUMMARY ===");
+  log("\n=== SUMMARY ===");
+  for(const [n,ok] of results) log(n+": "+(ok?"PASS":"FAIL"));
   log(gl.isContextLost()
     ? "[!!!] WebGL context is LOST"
     : "[+] WebGL context remains active");
-  log("A/B/C/D isolate framebuffer state; E reaches glBlitFramebuffer only if the destination FBO is complete.");
 }
 
 document.getElementById("run").addEventListener("click",run);
