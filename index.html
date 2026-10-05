@@ -5,27 +5,36 @@
 <pre id="log"></pre>
 
 <script>
-const log = x =>
-  document.querySelector("#log").textContent += x + "\n";
-
 async function test() {
+  const log = x => document.querySelector("#log").textContent += x + "\n";
+  document.querySelector("#log").textContent = "";
+
   log("origin = " + location.origin);
 
-  if (!window.showOpenFilePicker) {
-    log("showOpenFilePicker: NOT SUPPORTED");
-    return;
-  }
-
-  log("showOpenFilePicker: SUPPORTED");
-
   try {
-    const handles = await showOpenFilePicker({
+    const [handle] = await showOpenFilePicker({
       multiple: false
     });
 
-    log("PICKER RETURNED");
-    log("handles = " + handles.length);
+    log("kind = " + handle.kind);
+    log("name = " + handle.name);
 
+    const permission = await handle.queryPermission({
+      mode: "read"
+    });
+
+    log("queryPermission = " + permission);
+
+    const file = await handle.getFile();
+
+    log("getFile() = SUCCESS");
+    log("file.name = " + file.name);
+    log("file.size = " + file.size);
+    log("file.type = " + file.type);
+
+    const text = await file.text();
+    log("read() = SUCCESS");
+    log("content = " + text);
   } catch (e) {
     log("ERROR: " + e.name);
     log(e.message);
