@@ -1,94 +1,57 @@
-<!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Texture Reallocation + FBO State v1</title>
-<pre id=o>starting...</pre>
+<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ANGLE Indexed Draw / Primitive Restart v1</title><pre id=o>starting...</pre>
 <script>
-const o=document.getElementById("o"), log=s=>o.textContent+=s+"\n";
-function G(){const c=document.createElement("canvas");c.width=c.height=32;
- return c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});}
-function err(gl){return gl.getError();}
-function makeTex(gl,w,h,data=null){
- const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
- gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
- return t;
-}
-function fbo(gl,t,level=0){
- const f=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,level);
- return f;
-}
-function prog(gl){
+const o=document.getElementById("o"),log=s=>o.textContent+=s+"\n";
+function G(){const c=document.createElement("canvas");c.width=c.height=32;return c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});}
+function mk(gl){
  const vs=gl.createShader(gl.VERTEX_SHADER),fs=gl.createShader(gl.FRAGMENT_SHADER);
- gl.shaderSource(vs,"#version 300 es\nvoid main(){vec2 p=vec2(-1.0+float(gl_VertexID&1)*2.0,-1.0+float((gl_VertexID>>1)&1)*2.0);gl_Position=vec4(p,0,1);}");
- gl.shaderSource(fs,"#version 300 es\nprecision highp float; uniform vec4 u; out vec4 c; void main(){c=u;}");
- gl.compileShader(vs);gl.compileShader(fs);
- const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);return p;
+ gl.shaderSource(vs,"#version 300 es\nlayout(location=0) in vec2 p; flat out int id; void main(){gl_Position=vec4(p,0,1);id=gl_VertexID;}");
+ gl.shaderSource(fs,"#version 300 es\nprecision highp float; flat in int id; out vec4 c; void main(){c=vec4(float((id%7)+1)/8.0,0,0,1);}");
+ gl.compileShader(vs);gl.compileShader(fs);const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);return p;
 }
-function run(gl,n,fn){
- try{gl.getError();fn();const e=gl.getError();
-   log(n+": "+(e===gl.NO_ERROR?"PASS":"GL_ERROR 0x"+e.toString(16)));
- }catch(e){log(n+": EXCEPTION "+e)}
+function setup(gl){
+ const v=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,v);
+ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([
+ -1,-1,-.5,-1,0,-1,.5,-1,1,-1,-1,0,-.5,0,0,0,.5,0,1,0,-1,1,-.5,1,0,1,.5,1,1,1]),gl.STATIC_DRAW);
+ gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,8,0);
+ const i=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,i);return [v,i];
 }
-const gl=G();
-if(!gl) log("NO WEBGL2"); else {
- log("WebGL2 OK");
- log("renderer="+gl.getParameter(gl.RENDERER));
- const p=prog(gl), u=gl.getUniformLocation(p,"u");
+function test(gl,n,fn){try{gl.getError();fn();let e=gl.getError();log(n+": "+(e===gl.NO_ERROR?"PASS":"GL_ERROR 0x"+e.toString(16)));}catch(e){log(n+": EXCEPTION "+e)}}
+const gl=G();if(!gl)log("NO WEBGL2");else{
+ log("WebGL2 OK");log("renderer="+gl.getParameter(gl.RENDERER));const p=mk(gl);gl.useProgram(p);
+ const [v,i]=setup(gl);
 
- // A: attached texture resized smaller, then FBO is rebound and drawn.
- run(gl,"A attached mutable resize down/up",()=>{
-   const t=makeTex(gl,16,16,new Uint8Array(16*16*4).fill(17));
-   const f=fbo(gl,t); gl.viewport(0,0,16,16); gl.useProgram(p);
-   gl.uniform4f(u,1,0,0,1); gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.bindTexture(gl.TEXTURE_2D,t); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,4,4,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4*4*4).fill(33));
-   gl.bindFramebuffer(gl.FRAMEBUFFER,f); gl.viewport(0,0,4,4);
-   gl.uniform4f(u,0,1,0,1); gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,16,16,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(16*16*4).fill(55));
-   gl.bindFramebuffer(gl.FRAMEBUFFER,f); gl.viewport(0,0,16,16);
-   gl.uniform4f(u,0,0,1,1); gl.drawArrays(gl.TRIANGLES,0,3);
+ test(gl,"A UBYTE fixed restart boundary",()=>{
+  gl.enable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint8Array([0,1,2,255,2,3,4,255,4,5,6]),gl.STATIC_DRAW);
+  gl.drawElements(gl.TRIANGLES,11,gl.UNSIGNED_BYTE,0);
+  gl.disable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
  });
 
- // B: FBO attachment switches between two mutable textures while one is reallocated.
- run(gl,"B attachment switch + reallocation",()=>{
-   const a=makeTex(gl,8,8),b=makeTex(gl,8,8); const f=gl.createFramebuffer();
-   gl.bindFramebuffer(gl.FRAMEBUFFER,f); gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,0);
-   gl.viewport(0,0,8,8);gl.useProgram(p);gl.uniform4f(u,1,0,0,1);gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,b,0);
-   gl.uniform4f(u,0,1,0,1);gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.bindTexture(gl.TEXTURE_2D,a);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,2,2,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(16).fill(77));
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,0);
-   gl.viewport(0,0,2,2);gl.uniform4f(u,0,0,1,1);gl.drawArrays(gl.TRIANGLES,0,3);
+ test(gl,"B USHORT fixed restart boundary",()=>{
+  gl.enable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
+  const x=new Uint16Array([0,1,2,65535,2,3,4,65535,4,5,6]);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,x,gl.STATIC_DRAW);
+  gl.drawElements(gl.TRIANGLES,11,gl.UNSIGNED_SHORT,0);
+  gl.disable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
  });
 
- // C: mip level attachment + redefine attached level and switch base/max state.
- run(gl,"C mip attachment + base/max churn",()=>{
-   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
-   for(let l=0;l<4;l++) gl.texImage2D(gl.TEXTURE_2D,l,gl.RGBA8,16>>l,16>>l,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array((16>>l)*(16>>l)*4).fill(20+l));
-   const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,2);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,3);
-   gl.viewport(0,0,4,4);gl.useProgram(p);gl.uniform4f(u,1,1,0,1);gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.bindTexture(gl.TEXTURE_2D,t);
-   gl.texImage2D(gl.TEXTURE_2D,2,gl.RGBA8,8,8,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(8*8*4).fill(99));
-   gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.viewport(0,0,8,8);gl.uniform4f(u,0,1,1,1);gl.drawArrays(gl.TRIANGLES,0,3);
+ test(gl,"C restart toggle + offset",()=>{
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array([0,1,2,65535,2,3,4,5,6]),gl.STATIC_DRAW);
+  gl.enable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
+  gl.drawElements(gl.TRIANGLES,7,gl.UNSIGNED_SHORT,2);
+  gl.disable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
+  gl.drawElements(gl.TRIANGLES,3,gl.UNSIGNED_SHORT,4);
  });
 
- // D: delete/recreate texture name after detaching, with persistent FBO object.
- run(gl,"D detach-delete-recreate",()=>{
-   let t=makeTex(gl,8,8),f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
-   gl.viewport(0,0,8,8);gl.useProgram(p);gl.uniform4f(u,1,0,1,1);gl.drawArrays(gl.TRIANGLES,0,3);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,null,0);
-   gl.deleteTexture(t);
-   t=makeTex(gl,4,4,new Uint8Array(64).fill(123));
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
-   gl.viewport(0,0,4,4);gl.uniform4f(u,1,1,1,1);gl.drawArrays(gl.TRIANGLES,0,3);
+ test(gl,"D resize/rebind index buffer",()=>{
+  gl.enable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array([0,1,2,65535,2,3,4]),gl.DYNAMIC_DRAW);
+  gl.drawElements(gl.TRIANGLES,7,gl.UNSIGNED_SHORT,0);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,64,gl.DYNAMIC_DRAW);
+  gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER,0,new Uint16Array([0,1,2,65535,3,4,5]));
+  gl.drawElements(gl.TRIANGLES,7,gl.UNSIGNED_SHORT,0);
+  gl.disable(gl.PRIMITIVE_RESTART_FIXED_INDEX);
  });
  log("DONE");
 }
