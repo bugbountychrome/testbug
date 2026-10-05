@@ -1,141 +1,94 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Transform Feedback Regression v2</title>
-<style>
-body{font:14px monospace;background:#111;color:#ddd;padding:12px}
-button{display:block;width:100%;margin:7px 0;padding:12px}
-.ok{color:#8f8}.bad{color:#f88}.info{color:#8cf}
-</style>
-<h3>ANGLE Transform Feedback Regression v2</h3>
-<div id="info"></div>
-<button id="all" type="button">RUN ALL 4 TESTS</button>
-<pre id="out"></pre>
+<title>ANGLE Mali ReadPixels Clip/Pack-State v1</title>
+<pre id=o>starting...</pre>
 <script>
-"use strict";
-const VS=`#version 300 es
-in vec4 a; out vec4 tf;
-void main(){tf=a;gl_Position=a;}`;
-const FS=`#version 300 es
-precision highp float; out vec4 c;
-void main(){c=vec4(1.0);}`;
-
-function log(s,c=""){let d=document.createElement("div");d.textContent=s;if(c)d.className=c;out.appendChild(d)}
-function fresh(){
- const c=document.createElement("canvas");c.width=32;c.height=32;
- const g=c.getContext("webgl2",{antialias:false});
- if(!g)throw Error("WebGL2 unavailable");return g
+const out=document.getElementById("o");
+function log(s){out.textContent+=s+"\n"}
+function hex(v){return "0x"+v.toString(16)}
+function check(gl,name,fn){
+  try{
+    gl.getError();
+    fn();
+    const e=gl.getError();
+    log(name+": "+(e===gl.NO_ERROR?"PASS":"GL_ERROR "+hex(e)));
+  }catch(e){log(name+": EXCEPTION "+e)}
 }
-function en(g,e){return e===g.NO_ERROR?"NO_ERROR":
- e===g.INVALID_ENUM?"INVALID_ENUM":e===g.INVALID_VALUE?"INVALID_VALUE":
- e===g.INVALID_OPERATION?"INVALID_OPERATION":e===g.OUT_OF_MEMORY?"OUT_OF_MEMORY":
- "0x"+e.toString(16)}
-function drain(g){while(g.getError()!==g.NO_ERROR){}}
-function program(g){
- let v=g.createShader(g.VERTEX_SHADER);g.shaderSource(v,VS);g.compileShader(v);
- if(!g.getShaderParameter(v,g.COMPILE_STATUS))throw Error("VS compile");
- let f=g.createShader(g.FRAGMENT_SHADER);g.shaderSource(f,FS);g.compileShader(f);
- if(!g.getShaderParameter(f,g.COMPILE_STATUS))throw Error("FS compile");
- let p=g.createProgram();g.attachShader(p,v);g.attachShader(p,f);
- g.bindAttribLocation(p,0,"a");
- g.transformFeedbackVaryings(p,["tf"],g.INTERLEAVED_ATTRIBS);
- g.linkProgram(p);if(!g.getProgramParameter(p,g.LINK_STATUS))throw Error("link");
- return p
+function makeGL(){
+  const c=document.createElement("canvas");
+  c.width=32;c.height=32;
+  const gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
+  if(!gl){log("NO WEBGL2");return null}
+  return gl;
 }
-function setup(g){
- let p=program(g),b=g.createBuffer(),tf=g.createTransformFeedback();
- g.bindBuffer(g.ARRAY_BUFFER,b);
- g.bufferData(g.ARRAY_BUFFER,new Float32Array([
-  -.8,-.8,0,1, .8,-.8,0,1, 0,.8,0,1
- ]),g.STATIC_DRAW);
- g.bindBuffer(g.ARRAY_BUFFER,null);
- g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
- g.bindBufferBase(g.TRANSFORM_FEEDBACK_BUFFER,0,b);
- g.useProgram(p);
- g.bindBuffer(g.ARRAY_BUFFER,b);
- g.enableVertexAttribArray(0);
- g.vertexAttribPointer(0,4,g.FLOAT,false,0,0);
- return {p,b,tf}
-}
-function run(n){
- out.textContent="";
- let g=null,s=null,tf2=null;
- try{
-  g=fresh();drain(g);s=setup(g);let {p,b,tf}=s;
-  g.beginTransformFeedback(g.TRIANGLES);let e=g.getError();
-  if(e!==g.NO_ERROR)throw Error("beginTF "+en(g,e));
-  g.pauseTransformFeedback();e=g.getError();
-  if(e!==g.NO_ERROR)throw Error("pause "+en(g,e));
+function sentinelTest(gl,name,area,skipRows,skipPixels,rowLength){
+  const w=area[2], h=area[3], bpp=4;
+  const stride=(rowLength||w)*bpp;
+  const base=256;
+  const needed=base + skipRows*stride + skipPixels*bpp + h*stride + 256;
+  const pbo=gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
+  gl.bufferData(gl.PIXEL_PACK_BUFFER,needed,gl.STREAM_READ);
+  const before=new Uint8Array(needed); before.fill(0xA5);
+  gl.bufferSubData(gl.PIXEL_PACK_BUFFER,0,before);
 
-  if(n===1){
-   g.resumeTransformFeedback();
-   log("control resume="+en(g,g.getError()));
-   g.endTransformFeedback();
-   log("end="+en(g,g.getError()));
-  } else {
-   tf2=g.createTransformFeedback();
-   g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf2);
-   e=g.getError();log("unbind/rebind transition="+en(g,e));
+  gl.pixelStorei(gl.PACK_ALIGNMENT,1);
+  gl.pixelStorei(gl.PACK_ROW_LENGTH,rowLength);
+  gl.pixelStorei(gl.PACK_SKIP_ROWS,skipRows);
+  gl.pixelStorei(gl.PACK_SKIP_PIXELS,skipPixels);
 
-   if(n===2){
-    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
-    g.resumeTransformFeedback();
-    log("restore + resume="+en(g,g.getError()));
-    g.endTransformFeedback();
-    log("end="+en(g,g.getError()));
-   }
+  gl.readPixels(area[0],area[1],area[2],area[3],gl.RGBA,gl.UNSIGNED_BYTE,base);
 
-   if(n===3){
-    // WebGL2-valid replacement for mapBufferRange:
-    // attempt to replace storage while the paused TF still references b.
-    g.bindBuffer(g.ARRAY_BUFFER,b);
-    g.bufferData(g.ARRAY_BUFFER,new Float32Array(32),g.DYNAMIC_DRAW);
-    log("bufferData while paused TF references buffer="+en(g,g.getError()));
-    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
-    g.resumeTransformFeedback();
-    log("restore + resume="+en(g,g.getError()));
-    g.endTransformFeedback();
-    log("end="+en(g,g.getError()));
-   }
+  const err=gl.getError();
+  let data=new Uint8Array(needed);
+  gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,data);
 
-   if(n===4){
-    // More state churn: change ARRAY_BUFFER storage, read it back,
-    // restore TF, then resume and draw.
-    g.bindBuffer(g.ARRAY_BUFFER,b);
-    g.bufferData(g.ARRAY_BUFFER,new Float32Array(32),g.DYNAMIC_DRAW);
-    log("bufferData="+en(g,g.getError()));
-
-    const read=new Float32Array(4);
-    g.getBufferSubData(g.ARRAY_BUFFER,0,read);
-    log("getBufferSubData="+en(g,g.getError()));
-
-    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
-    log("restore TF="+en(g,g.getError()));
-    g.resumeTransformFeedback();
-    log("resume="+en(g,g.getError()));
-
-    g.drawArrays(g.TRIANGLES,0,3);
-    log("draw="+en(g,g.getError()));
-    g.endTransformFeedback();
-    log("end="+en(g,g.getError()));
-   }
+  // Detect writes outside the expected destination envelope.
+  const lo=base + skipRows*stride + skipPixels*bpp;
+  const hi=lo + h*stride;
+  let outside=0, inside=0;
+  for(let i=0;i<data.length;i++){
+    if(data[i]!==0xA5){
+      if(i<lo || i>=hi) outside++;
+      else inside++;
+    }
   }
-  g.finish();
-  log("contextLost="+g.isContextLost());
-  log(g.isContextLost()?"UNEXPECTED CONTEXT LOSS":"PASS — no context loss",
-      g.isContextLost()?"bad":"ok");
- }catch(x){log("EXCEPTION: "+x.message,"bad")}
- finally{try{
-  if(g){g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,null);
-   if(s){if(s.tf)g.deleteTransformFeedback(s.tf);g.deleteBuffer(s.b);g.deleteProgram(s.p)}
-   if(tf2)g.deleteTransformFeedback(tf2)}
- }catch(_){}}
+  log(name+": "+(err===gl.NO_ERROR?"NO_ERROR":"ERR "+hex(err))+
+      " inside="+inside+" outside="+outside+
+      " range=["+lo+","+hi+")");
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+  gl.deleteBuffer(pbo);
 }
-async function all(){
- let b=document.getElementById("all");b.disabled=true;out.textContent="";
- try{for(let i=1;i<=4;i++){log("=== TEST "+i+" ===","info");run(i);await new Promise(r=>setTimeout(r,300))}}
- finally{b.disabled=false}
+
+const gl=makeGL();
+if(gl){
+  gl.viewport(0,0,32,32);
+  gl.clearColor(0.25,0.5,0.75,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  log("WebGL2 OK");
+  log("renderer="+gl.getParameter(gl.RENDERER));
+  log("version="+gl.getParameter(gl.VERSION));
+
+  // A: left/top clipping + skip state, small row length.
+  check(gl,"A",()=>sentinelTest(gl,"A clip-left/top + skip",[-8,-6,16,16],2,3,20));
+
+  // B: clipping on right/bottom while preserving original row stride.
+  check(gl,"B",()=>sentinelTest(gl,"B clip-right/bottom + skip",[24,24,16,16],3,2,24));
+
+  // C: both-side clipping and row-length == requested width.
+  check(gl,"C",()=>sentinelTest(gl,"C both clip + tight rowLength",[-4,24,12,12],1,1,12));
+
+  // D: state churn between valid reads; catches stale ANGLE/backend PACK state.
+  check(gl,"D",()=>{
+    sentinelTest(gl,"D1 clipped",[-6,8,14,14],1,2,18);
+    sentinelTest(gl,"D2 unclipped",[4,4,12,12],0,0,16);
+    sentinelTest(gl,"D3 clipped again",[28,-5,12,14],2,1,20);
+  });
+
+  gl.pixelStorei(gl.PACK_ROW_LENGTH,0);
+  gl.pixelStorei(gl.PACK_SKIP_ROWS,0);
+  gl.pixelStorei(gl.PACK_SKIP_PIXELS,0);
+  log("DONE");
 }
-document.getElementById("all").addEventListener("click",all);
-try{let g=fresh();info.textContent="WebGL2="+!!g+" | "+g.getParameter(g.RENDERER)+" | "+g.getParameter(g.VERSION)}
-catch(e){info.textContent=e.message}
 </script>
