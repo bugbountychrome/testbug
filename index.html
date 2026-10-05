@@ -12,7 +12,7 @@ button{display:block;width:100%;margin:7px 0;padding:12px}
 <button onclick="run(2)">TEST 2 — same row length, 2 rows</button>
 <button onclick="run(3)">TEST 3 — row length + 1</button>
 <button onclick="run(4)">TEST 4 — skip rows + boundary</button>
-<button onclick="all()">RUN ALL</button>
+<button id="runall" type="button">RUN ALL</button>
 <pre id="out"></pre>
 <script>
 "use strict";
@@ -141,11 +141,18 @@ function run(n) {
 }
 async function all() {
   out.textContent="";
-  for(let i=1;i<=4;i++){
-    run(i);
-    await new Promise(r=>setTimeout(r,300));
+  const b=document.getElementById("runall");
+  b.disabled=true;
+  try {
+    for(let i=1;i<=4;i++){
+      run(i);
+      await new Promise(r=>setTimeout(r,500));
+    }
+  } finally {
+    b.disabled=false;
   }
 }
+document.getElementById("runall").addEventListener("click", all);
 try {
   const gl=fresh();
   info.textContent =
