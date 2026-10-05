@@ -1,14 +1,15 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali FBO Query Flush Regression</title>
+<title>Mali FBO Query Flush Regression v2</title>
 <style>
 body{font-family:monospace;background:#111;color:#ddd;padding:16px}
 button{display:block;width:100%;padding:14px;margin:10px 0;font:inherit}
 pre{white-space:pre-wrap;word-break:break-word}
 .ok{color:#8f8}.bad{color:#f88}
 </style>
-<h3>Mali FBO Query Flush Regression</h3>
-<p>Bounded WebGL2 test for FBO unbind/delete while GPU queries are pending.</p>
+
+<h3>Mali FBO Query Flush Regression v2</h3>
+<p>WebGL2 core ANY_SAMPLES_PASSED query. All workloads are bounded.</p>
 <button id="a">A — query + unbind FBO</button>
 <button id="b">B — query + delete FBO</button>
 <button id="c">C — query + delete/recreate ×20</button>
@@ -18,35 +19,61 @@ pre{white-space:pre-wrap;word-break:break-word}
 <script>
 (() => {
 "use strict";
+
 const out=document.getElementById("log");
-function log(s,cls){
-  const x=document.createElement("div"); x.textContent=s;
-  if(cls)x.className=cls; out.appendChild(x);
-}
 function reset(){out.textContent="";}
+function log(s,cls){
+  const x=document.createElement("div");
+  x.textContent=s;
+  if(cls)x.className=cls;
+  out.appendChild(x);
+}
 
 const canvas=document.createElement("canvas");
-canvas.width=256; canvas.height=256;
+canvas.width=256;
+canvas.height=256;
 document.body.appendChild(canvas);
 
 const gl=canvas.getContext("webgl2",{antialias:false});
-if(!gl){out.textContent="WebGL2 unavailable";return;}
+if(!gl){
+  out.textContent="WebGL2 unavailable";
+  return;
+}
 
-const ext=gl.getExtension("EXT_disjoint_timer_query_webgl2");
 log("Renderer: "+gl.getParameter(gl.RENDERER));
 log("Version: "+gl.getParameter(gl.VERSION));
-log("Query extension: "+(ext?"AVAILABLE":"UNAVAILABLE"));
+log("WebGL2 ANY_SAMPLES_PASSED: core");
 
 let lost=false;
 canvas.addEventListener("webglcontextlost",e=>{
-  e.preventDefault(); lost=true; log("[CONTEXT LOST]","bad");
+  e.preventDefault();
+  lost=true;
+  log("[CONTEXT LOST]","bad");
 });
-canvas.addEventListener("webglcontextrestored",()=>log("[CONTEXT RESTORED]"));
+canvas.addEventListener("webglcontextrestored",()=>{
+  log("[CONTEXT RESTORED]");
+});
 
-function err(label){
+function checkError(label){
   const e=gl.getError();
-  if(e!==gl.NO_ERROR){log("[FAIL] "+label+" GL error=0x"+e.toString(16),"bad");return false;}
+  if(e!==gl.NO_ERROR){
+    log("[FAIL] "+label+" GL error=0x"+e.toString(16),"bad");
+    return false;
+  }
   return true;
+}
+
+function finish(){
+  const e=gl.getError();
+  if(e!==gl.NO_ERROR){
+    log("[FAIL] trailing GL error=0x"+e.toString(16),"bad");
+    return;
+  }
+  if(lost){
+    log("[FAIL] context lost","bad");
+    return;
+  }
+  log("[PASS] no GL error / no context loss","ok");
 }
 
 function makeTex(size=128){
@@ -54,7 +81,10 @@ function makeTex(size=128){
   gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,size,size,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texImage2D(
+    gl.TEXTURE_2D,0,gl.RGBA8,size,size,0,
+    gl.RGBA,gl.UNSIGNED_BYTE,null
+  );
   gl.bindTexture(gl.TEXTURE_2D,null);
   return t;
 }
@@ -62,120 +92,192 @@ function makeTex(size=128){
 function makeFbo(t){
   const f=gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,
-                          gl.TEXTURE_2D,t,0);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    t,
+    0
+  );
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+  const status=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(status!==gl.FRAMEBUFFER_COMPLETE){
+    log("[FAIL] FBO incomplete: 0x"+status.toString(16),"bad");
+  }
+
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   return f;
 }
 
-function render(f){
+function renderWork(f){
   gl.bindFramebuffer(gl.FRAMEBUFFER,f);
   gl.viewport(0,0,128,128);
+
+  // Small deterministic GPU workload.
   gl.clearColor(.17,.31,.49,1);
   gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // Several bounded clears increase queued GPU work without
+  // turning this into a stress/freeze test.
+  for(let i=0;i<8;i++){
+    gl.clearColor(
+      ((i*37)&255)/255,
+      ((i*73)&255)/255,
+      ((i*109)&255)/255,
+      1
+    );
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
 }
 
-function makeQuery(){
-  if(!ext)return null;
+function beginSamplesQuery(){
   const q=gl.createQuery();
-  gl.beginQuery(ext.TIME_ELAPSED_EXT,q);
-  // Small bounded GPU workload.
+  gl.beginQuery(gl.ANY_SAMPLES_PASSED,q);
+
+  // Query is active while GPU work is issued.
   gl.clearColor(.23,.41,.67,1);
   gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.endQuery(ext.TIME_ELAPSED_EXT);
+
+  gl.endQuery(gl.ANY_SAMPLES_PASSED);
   return q;
 }
 
-function poll(q){
-  if(!q)return true;
-  // Poll once; do not spin-wait.
-  const available=gl.getQueryParameter(q,gl.QUERY_RESULT_AVAILABLE);
-  const disjoint=gl.getParameter(ext.GPU_DISJOINT_EXT);
-  return {available,disjoint};
+function pollQuery(q){
+  const available=gl.getQueryParameter(
+    q,gl.QUERY_RESULT_AVAILABLE
+  );
+  let result=null;
+
+  if(available){
+    result=gl.getQueryParameter(q,gl.QUERY_RESULT);
+  }
+
+  return {available,result};
 }
 
-function finishCheck(){
-  const e=gl.getError();
-  if(e!==gl.NO_ERROR){log("[FAIL] trailing GL error=0x"+e.toString(16),"bad");return false;}
-  if(lost){log("[FAIL] context lost","bad");return false;}
-  log("[PASS] no GL error / no context loss","ok");
-  return true;
+function createCase(){
+  const t=makeTex();
+  const f=makeFbo(t);
+  renderWork(f);
+  const q=beginSamplesQuery();
+  return {t,f,q};
 }
 
+/* A: query completes, then FBO is unbound. */
 document.getElementById("a").onclick=()=>{
- reset(); log("=== TEST A: query + unbind FBO ===");
- if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
- const t=makeTex(),f=makeFbo(t);
- render(f);
- const q=makeQuery();
- gl.bindFramebuffer(gl.FRAMEBUFFER,null);
- const p=poll(q);
- log("query available="+p.available+" disjoint="+p.disjoint);
- gl.deleteQuery(q); gl.deleteFramebuffer(f); gl.deleteTexture(t);
- finishCheck();
+  reset();
+  log("=== TEST A: query + unbind FBO ===");
+
+  const c=createCase();
+
+  // Critical ordering:
+  // query ended, FBO still bound -> immediately unbind.
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+
+  const p=pollQuery(c.q);
+  log("query available="+p.available+
+      " result="+p.result);
+
+  gl.deleteQuery(c.q);
+  gl.deleteFramebuffer(c.f);
+  gl.deleteTexture(c.t);
+
+  finish();
 };
 
+/* B: query completes, then FBO is unbound and deleted. */
 document.getElementById("b").onclick=()=>{
- reset(); log("=== TEST B: query + delete FBO ===");
- if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
- const t=makeTex(),f=makeFbo(t);
- render(f);
- const q=makeQuery();
- gl.bindFramebuffer(gl.FRAMEBUFFER,null);
- gl.deleteFramebuffer(f);
- gl.deleteTexture(t);
- const p=poll(q);
- log("query available="+p.available+" disjoint="+p.disjoint);
- gl.deleteQuery(q);
- finishCheck();
+  reset();
+  log("=== TEST B: query + delete FBO ===");
+
+  const c=createCase();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.deleteFramebuffer(c.f);
+  gl.deleteTexture(c.t);
+
+  const p=pollQuery(c.q);
+  log("query available="+p.available+
+      " result="+p.result);
+
+  gl.deleteQuery(c.q);
+
+  // Continue normal GL activity after deletion.
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  finish();
 };
 
+/* C: bounded repeated query/FBO destruction. */
 document.getElementById("c").onclick=()=>{
- reset(); log("=== TEST C: query + delete/recreate ×20 ===");
- if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
- for(let i=1;i<=20;i++){
-   const t=makeTex(),f=makeFbo(t);
-   render(f);
-   const q=makeQuery();
-   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-   gl.deleteFramebuffer(f);
-   gl.deleteTexture(t);
-   const p=poll(q);
-   if(i===1||i===20)log("cycle "+i+" available="+p.available+" disjoint="+p.disjoint);
-   gl.deleteQuery(q);
-   if(lost)break;
- }
- finishCheck();
+  reset();
+  log("=== TEST C: query + delete/recreate ×20 ===");
+
+  for(let i=1;i<=20;i++){
+    const c=createCase();
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.deleteFramebuffer(c.f);
+    gl.deleteTexture(c.t);
+
+    const p=pollQuery(c.q);
+
+    if(i===1 || i===20){
+      log("cycle "+i+
+          " available="+p.available+
+          " result="+p.result);
+    }
+
+    gl.deleteQuery(c.q);
+
+    if(lost)break;
+  }
+
+  finish();
 };
 
+/* D: query + destroy old FBO + immediately continue on new FBO. */
 document.getElementById("d").onclick=()=>{
- reset(); log("=== TEST D: query + FBO state churn ×20 ===");
- if(!ext){log("[SKIP] EXT_disjoint_timer_query_webgl2 unavailable");return;}
- for(let i=1;i<=20;i++){
-   const t0=makeTex(),t1=makeTex();
-   const f=makeFbo(t0);
-   render(f);
-   const q=makeQuery();
+  reset();
+  log("=== TEST D: query + FBO state churn ×20 ===");
 
-   // Unbind/delete while query work may still be pending.
-   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-   gl.deleteFramebuffer(f);
-   gl.deleteTexture(t0);
+  for(let i=1;i<=20;i++){
+    const oldTex=makeTex();
+    const oldFbo=makeFbo(oldTex);
 
-   // Rebind a fresh FBO and continue normal work.
-   const f2=makeFbo(t1);
-   render(f2);
-   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    renderWork(oldFbo);
+    const q=beginSamplesQuery();
 
-   const p=poll(q);
-   if(i===1||i===20)log("cycle "+i+" available="+p.available+" disjoint="+p.disjoint);
-   gl.deleteQuery(q);
-   gl.deleteFramebuffer(f2);
-   gl.deleteTexture(t1);
-   if(lost)break;
- }
- finishCheck();
+    // Destroy the FBO/query-associated texture path.
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.deleteFramebuffer(oldFbo);
+    gl.deleteTexture(oldTex);
+
+    // Immediately create and use a fresh FBO.
+    const newTex=makeTex();
+    const newFbo=makeFbo(newTex);
+    renderWork(newFbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+
+    const p=pollQuery(q);
+
+    if(i===1 || i===20){
+      log("cycle "+i+
+          " available="+p.available+
+          " result="+p.result);
+    }
+
+    gl.deleteQuery(q);
+    gl.deleteFramebuffer(newFbo);
+    gl.deleteTexture(newTex);
+
+    if(lost)break;
+  }
+
+  finish();
 };
 })();
 </script>
