@@ -2,153 +2,121 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>FSA Revocation PoC</title>
+  <title>WebGL Android GPU Test</title>
 </head>
 
 <body>
 
-<button onclick="setup()">1. SETUP</button>
-<button onclick="removeFile()">2. REMOVE FILE</button>
-<button onclick="moveFile()">3. MOVE FILE</button>
-<button onclick="readMovedFile()">4. READ MOVED FILE</button>
+<button onclick="runTest()">RUN WEBGL TEST</button>
 
 <pre id="log"></pre>
 
 <script>
-let dirHandle = null;
-let fileHandle = null;
-
-const log = (x) => {
+function log(x) {
   document.getElementById("log").textContent += x + "\n";
-};
+}
 
-async function setup() {
+function runTest() {
   document.getElementById("log").textContent = "";
 
-  try {
-    log("Origin: " + location.origin);
+  const canvas = document.createElement("canvas");
 
-    dirHandle = await showDirectoryPicker({
-      mode: "readwrite"
-    });
+  const gl = canvas.getContext("webgl2", {
+    antialias: false
+  });
 
-    log("DIRECTORY HANDLE: OK");
-
-    fileHandle = await dirHandle.getFileHandle("FSA_TEST.txt");
-
-    log("FILE HANDLE: OK");
-    log("name: " + fileHandle.name);
-
-    log(
-      "read permission: " +
-      await fileHandle.queryPermission({ mode: "read" })
-    );
-
-    log(
-      "write permission: " +
-      await fileHandle.queryPermission({ mode: "readwrite" })
-    );
-
-    const file = await fileHandle.getFile();
-
-    log("INITIAL CONTENT: " + await file.text());
-
-  } catch (e) {
-    log("SETUP ERROR: " + e.name);
-    log(e.message);
+  if (!gl) {
+    log("WebGL2: NOT SUPPORTED");
+    return;
   }
-}
 
-async function removeFile() {
-  try {
-    if (!fileHandle) {
-      log("Run SETUP first.");
-      return;
+  log("WebGL2: SUPPORTED");
+
+  const debug = gl.getExtension("WEBGL_debug_renderer_info");
+
+  if (debug) {
+    log(
+      "Vendor: " +
+      gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)
+    );
+
+    log(
+      "Renderer: " +
+      gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+    );
+  }
+
+  let lost = false;
+
+  canvas.addEventListener("webglcontextlost", function(e) {
+    e.preventDefault();
+    lost = true;
+    log("CONTEXT LOST");
+  });
+
+  canvas.addEventListener("webglcontextrestored", function() {
+    log("CONTEXT RESTORED");
+  });
+
+  // NPOT immutable texture
+  const tex = gl.createTexture();
+
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+
+  const width = 257;
+  const height = 193;
+
+  gl.texStorage2D(
+    gl.TEXTURE_2D,
+    8,
+    gl.RGBA8,
+    width,
+    height
+  );
+
+  log("Immutable NPOT texture: CREATED");
+
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_BASE_LEVEL,
+    0
+  );
+
+  log("BASE_LEVEL = 0");
+
+  gl.getError();
+
+  // Trigger the affected state transition
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_BASE_LEVEL,
+    1
+  );
+
+  const err = gl.getError();
+
+  log("BASE_LEVEL = 1");
+  log("gl.getError() = " + err);
+
+  if (err === gl.NO_ERROR) {
+    log("BASE_LEVEL CHANGE ACCEPTED");
+  }
+
+  // Give the GPU command queue time to process
+  setTimeout(() => {
+
+    log("");
+    log("=== RESULT ===");
+
+    if (lost) {
+      log("Context was lost.");
+    } else {
+      log("Context still alive.");
     }
 
-    log("");
-    log("=== REMOVE ===");
+    log("TEST COMPLETE");
 
-    await fileHandle.remove();
-
-    log("remove(): SUCCESS");
-
-    log(
-      "read permission after remove: " +
-      await fileHandle.queryPermission({ mode: "read" })
-    );
-
-    log(
-      "write permission after remove: " +
-      await fileHandle.queryPermission({ mode: "readwrite" })
-    );
-
-    try {
-      await fileHandle.getFile();
-      log("OLD HANDLE READ: SUCCESS");
-    } catch (e) {
-      log("OLD HANDLE READ: " + e.name);
-    }
-
-    log("");
-    log("NOW RECREATE FSA_TEST.txt EXTERNALLY");
-    log("Use Termux before pressing MOVE.");
-
-  } catch (e) {
-    log("REMOVE ERROR: " + e.name);
-    log(e.message);
-  }
-}
-
-async function moveFile() {
-  try {
-    if (!fileHandle || !dirHandle) {
-      log("Run SETUP first.");
-      return;
-    }
-
-    log("");
-    log("=== MOVE ===");
-
-    await fileHandle.move(
-      dirHandle,
-      "FSA_MOVED.txt"
-    );
-
-    log("move(): SUCCESS");
-
-  } catch (e) {
-    log("move(): " + e.name);
-    log(e.message);
-  }
-}
-
-async function readMovedFile() {
-  try {
-    log("");
-    log("=== READ MOVED FILE ===");
-
-    const newHandle =
-      await dirHandle.getFileHandle("FSA_MOVED.txt");
-
-    log("NEW HANDLE: SUCCESS");
-
-    log(
-      "new handle read permission: " +
-      await newHandle.queryPermission({ mode: "read" })
-    );
-
-    const file = await newHandle.getFile();
-
-    const content = await file.text();
-
-    log("READ SUCCESS");
-    log("CONTENT: " + content);
-
-  } catch (e) {
-    log("READ ERROR: " + e.name);
-    log(e.message);
-  }
+  }, 1500);
 }
 </script>
 
