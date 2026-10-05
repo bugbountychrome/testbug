@@ -1,43 +1,89 @@
 <!doctype html>
-<meta name="viewport" content="width=device-width">
+<html>
+<head>
+  <meta name="viewport" content="width=device-width">
+  <title>FSA Permission Test</title>
+</head>
 
-<button onclick="test()">TEST FILE SYSTEM ACCESS</button>
+<body>
+
+<button onclick="testPermission()">TEST FILE SYSTEM ACCESS</button>
+
 <pre id="log"></pre>
 
 <script>
-async function test() {
-  const log = x => document.querySelector("#log").textContent += x + "\n";
-  document.querySelector("#log").textContent = "";
+let handle = null;
 
-  log("origin = " + location.origin);
+function log(text) {
+  document.getElementById("log").textContent += text + "\n";
+}
+
+async function testPermission() {
+  document.getElementById("log").textContent = "";
 
   try {
-    const [handle] = await showOpenFilePicker({
+    log("Origin: " + location.origin);
+
+    if (!window.showOpenFilePicker) {
+      log("showOpenFilePicker: NOT SUPPORTED");
+      return;
+    }
+
+    log("showOpenFilePicker: SUPPORTED");
+
+    // Pilih file dummy milik sendiri
+    const result = await showOpenFilePicker({
       multiple: false
     });
 
-    log("kind = " + handle.kind);
-    log("name = " + handle.name);
+    handle = result[0];
 
-    const permission = await handle.queryPermission({
+    log("HANDLE CREATED");
+    log("kind: " + handle.kind);
+    log("name: " + handle.name);
+
+    // Cek permission
+    const query = await handle.queryPermission({
       mode: "read"
     });
 
-    log("queryPermission = " + permission);
+    log("queryPermission: " + query);
 
+    // Request permission
+    const request = await handle.requestPermission({
+      mode: "read"
+    });
+
+    log("requestPermission: " + request);
+
+    // Ambil file
     const file = await handle.getFile();
 
-    log("getFile() = SUCCESS");
-    log("file.name = " + file.name);
-    log("file.size = " + file.size);
-    log("file.type = " + file.type);
+    log("getFile: SUCCESS");
+    log("file.name: " + file.name);
+    log("file.size: " + file.size);
+    log("file.type: " + file.type);
 
-    const text = await file.text();
-    log("read() = SUCCESS");
-    log("content = " + text);
+    // Baca sedikit metadata saja
+    const buffer = await file.slice(0, 16).arrayBuffer();
+
+    const bytes = [...new Uint8Array(buffer)]
+      .map(x => x.toString(16).padStart(2, "0"))
+      .join(" ");
+
+    log("first 16 bytes: " + bytes);
+
+    log("");
+    log("=== TEST COMPLETE ===");
+
   } catch (e) {
+
     log("ERROR: " + e.name);
-    log(e.message);
+    log("MESSAGE: " + e.message);
+
   }
 }
 </script>
+
+</body>
+</html>
