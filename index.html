@@ -24,14 +24,11 @@ async function setup() {
   document.getElementById("log").textContent = "";
 
   try {
-    dirHandle = await showDirectoryPicker({
-      mode: "readwrite"
-    });
-
-    log("DIRECTORY: OK");
-
-    fileHandle =
-      await dirHandle.getFileHandle("FSA_TEST.txt");
+    fileHandle = await showOpenFilePicker({
+      multiple: false,
+      types: [],
+      excludeAcceptAllOption: false
+    }).then(x => x[0]);
 
     log("FILE HANDLE: OK");
 
