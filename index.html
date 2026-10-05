@@ -1,21 +1,20 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali FBO Blit + PBO Regression v8</title>
+<title>Mali Mip FBO + Blit + PBO Regression v9</title>
 <style>body{font-family:monospace;background:#111;color:#eee;padding:14px}button{font-size:15px;padding:10px;margin:4px 0}pre{white-space:pre-wrap}</style>
 </head><body>
-<h3>Mali FBO + glBlitFramebuffer + PBO v8</h3>
-<button onclick="run(0)">A: single color FBO blit</button>
-<button onclick="run(1)">B: multi-color FBO blit</button>
-<button onclick="run(2)">C: multi-color + mip-level</button>
-<button onclick="run(3)">D: blit → PBO re-upload → blit</button>
-<button onclick="run(4)">E: repeated blit/upload</button>
+<h3>Mali Mip-FBO + Blit + PBO v9</h3>
+<button onclick="run(0)">A: single mip1 FBO blit</button>
+<button onclick="run(1)">B: single mip2 FBO blit</button>
+<button onclick="run(2)">C: two mip1 color attachments</button>
+<button onclick="run(3)">D: mip1 blit → PBO upload → blit</button>
+<button onclick="run(4)">E: repeated mip1 blit/upload</button>
 <button onclick="out.textContent='Ready.'">Clear</button>
 <pre id="out">Ready.</pre>
 <script>
 "use strict";
-const out=document.getElementById("out"), log=s=>out.textContent+=s+"\\n";
-let gl,prog,vao,loc;
-const S=256,R=64;
+const out=document.getElementById("out"),log=s=>out.textContent+=s+"\\n";
+let gl,prog,vao,loc; const R=64;
 function hex(x){return "0x"+x.toString(16);}
 function init(){
  if(gl)return;
@@ -38,87 +37,108 @@ function init(){
  vao=gl.createVertexArray();gl.bindVertexArray(vao);
  const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([
- -1,-1,0,0,1,-1,1,0,-1,1,0,1,
- -1,1,0,1,1,-1,1,0,1,1,1,1]),gl.STATIC_DRAW);
+ -1,-1,0,0,1,-1,1,0,-1,1,0,1,-1,1,0,1,1,-1,1,0,1,1,1,1]),gl.STATIC_DRAW);
  const p=gl.getAttribLocation(prog,"p"),u=gl.getAttribLocation(prog,"uv");
  gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,16,0);
  gl.enableVertexAttribArray(u);gl.vertexAttribPointer(u,2,gl.FLOAT,false,16,8);
  loc=gl.getUniformLocation(prog,"t");
 }
-function dat(n,seed){let a=new Uint8Array(n);for(let i=0;i<n;i++)a[i]=(i*31+seed*19+(i>>>5))&255;return a;}
-function tex(w,h,l=0){
+function dat(n,s){let a=new Uint8Array(n);for(let i=0;i<n;i++)a[i]=(i*31+s*23+(i>>>5))&255;return a;}
+function texture(){
  const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
- gl.texImage2D(gl.TEXTURE_2D,l,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
- let e=gl.getError();if(e)throw Error("tex "+hex(e));return t;
+ return t;
 }
-function pboUpload(t,w,h,seed,oversized=true){
+function allocMip(t,baseW,baseH,maxLevel){
+ gl.bindTexture(gl.TEXTURE_2D,t);
+ for(let l=0;l<=maxLevel;l++){
+   const w=Math.max(1,baseW>>l),h=Math.max(1,baseH>>l);
+   gl.texImage2D(gl.TEXTURE_2D,l,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+   const e=gl.getError();if(e)throw Error("alloc L"+l+" "+hex(e));
+ }
+}
+function fillMip(t,l,w,h,seed){
  gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
- const n=w*h*4,b=gl.createBuffer();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);
- gl.bufferData(gl.PIXEL_UNPACK_BUFFER,oversized?n*2+4096:n,gl.STREAM_DRAW);
+ const b=gl.createBuffer(),n=w*h*4;
+ gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);gl.bufferData(gl.PIXEL_UNPACK_BUFFER,n*2+4096,gl.STREAM_DRAW);
  gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,dat(n,seed));
- gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
- let e=gl.getError();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
- if(e)throw Error("upload "+hex(e));
+ gl.texSubImage2D(gl.TEXTURE_2D,l,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+ const e=gl.getError();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);
+ if(e)throw Error("upload L"+l+" "+hex(e));
 }
-function fboOne(t){
+function fbo(t,l){
  const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
- if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("FBO incomplete");
- gl.drawBuffers([gl.COLOR_ATTACHMENT0]);return f;
-}
-function fboTwo(a,b){
- const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,0);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,b,0);
- gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
- if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("multi FBO incomplete");
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,l);
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+ const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+ if(s!==gl.FRAMEBUFFER_COMPLETE)throw Error("FBO L"+l+" "+hex(s));
  return f;
 }
-function fill(f,seed){
- gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.viewport(0,0,S,S);
- gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- gl.clearColor((seed&255)/255,.25,.5,1);gl.clear(gl.COLOR_BUFFER_BIT);
+function fbo2(a,b,l){
+ const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,l);
+ gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,b,l);
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
+ const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+ if(s!==gl.FRAMEBUFFER_COMPLETE)throw Error("multi FBO L"+l+" "+hex(s));
+ return f;
 }
-function blit(src,dst,w=S,h=S){
- gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
+function clearFbo(f,seed){
+ gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.viewport(0,0,128,128);
+ gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+ gl.clearColor((seed&255)/255,.2,.6,1);gl.clear(gl.COLOR_BUFFER_BIT);
+ const e=gl.getError();if(e)throw Error("clear "+hex(e));
+}
+function blit(a,b,size=128){
+ gl.bindFramebuffer(gl.READ_FRAMEBUFFER,a);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,b);
  gl.readBuffer(gl.COLOR_ATTACHMENT0);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- gl.blitFramebuffer(0,0,w,h,0,0,w,h,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+ gl.blitFramebuffer(0,0,size,size,0,0,size,size,gl.COLOR_BUFFER_BIT,gl.NEAREST);
  const e=gl.getError();if(e)throw Error("blit "+hex(e));
 }
-function sample(t){
- gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,R,R);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
- gl.useProgram(prog);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,0);
- gl.drawArrays(gl.TRIANGLES,0,6);let e=gl.getError();if(e)throw Error("draw "+hex(e));
+function sample(t,l){
+ gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,l);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,l);
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,R,R);gl.clear(gl.COLOR_BUFFER_BIT);
+ gl.useProgram(prog);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,0);gl.drawArrays(gl.TRIANGLES,0,6);
+ let e=gl.getError();if(e)throw Error("draw "+hex(e));
  const p=new Uint8Array(R*R*4);gl.readPixels(0,0,R,R,gl.RGBA,gl.UNSIGNED_BYTE,p);e=gl.getError();if(e)throw Error("read "+hex(e));
  let s=0;for(let i=0;i<p.length;i++)s=(s+p[i]*(i+1))>>>0;return s;
 }
+function uploadAgain(t,l,w,h,seed){
+ gl.bindTexture(gl.TEXTURE_2D,t);const n=w*h*4,b=gl.createBuffer();
+ gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,b);gl.bufferData(gl.PIXEL_UNPACK_BUFFER,n*2+4096,gl.STREAM_DRAW);gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,dat(n,seed));
+ gl.texSubImage2D(gl.TEXTURE_2D,l,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
+ const e=gl.getError();gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(b);if(e)throw Error("reupload "+hex(e));
+}
 function run(n){
- init();log("=== "+["A: single color FBO blit","B: multi-color FBO blit","C: multi-color + mip-level","D: blit -> PBO re-upload -> blit","E: repeated blit/upload"][n]+" ===");
+ init();const names=["single mip1 FBO blit","single mip2 FBO blit","two mip1 color attachments","mip1 blit → PBO upload → blit","repeated mip1 blit/upload"];
+ log("=== "+names[n]+" ===");
  try{
+  const base=256, mip1=128,mip2=64;
   if(n===0){
-   let a=tex(S,S),b=tex(S,S),fa=fboOne(a),fb=fboOne(b);fill(fa,21);blit(fa,fb);log("checksum="+sample(b));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
-  } else if(n===1){
-   let a=tex(S,S),b=tex(S,S),c=tex(S,S),fa=fboTwo(a,b),fb=fboOne(c);fill(fa,31);blit(fa,fb);log("checksum="+sample(c));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);[a,b,c].forEach(gl.deleteTexture.bind(gl));
-  } else if(n===2){
-   let a=tex(S,S,1),b=tex(S,S,1),c=tex(S,S,1),fa=gl.createFramebuffer(),fb=gl.createFramebuffer();
-   gl.bindFramebuffer(gl.FRAMEBUFFER,fa);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,a,1);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-   gl.bindFramebuffer(gl.FRAMEBUFFER,fb);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,b,1);gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-   if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error("mip FBO incomplete");
-   fill(fa,41);blit(fa,fb,S,S);log("checksum="+sample(b));[fa,fb].forEach(gl.deleteFramebuffer.bind(gl));[a,b,c].forEach(gl.deleteTexture.bind(gl));
-  } else if(n===3){
-   let a=tex(S,S),b=tex(S,S),c=tex(S,S),fa=fboOne(a),fb=fboOne(b),fc=fboOne(c);
-   fill(fa,51);blit(fa,fb);pboUpload(b,S,S,52,true);blit(fb,fc);log("checksum="+sample(c));
-   [fa,fb,fc].forEach(gl.deleteFramebuffer.bind(gl));[a,b,c].forEach(gl.deleteTexture.bind(gl));
-  } else {
-   let a=tex(S,S),b=tex(S,S),fa=fboOne(a),fb=fboOne(b);
-   for(let i=0;i<8;i++){fill(fa,60+i);blit(fa,fb);pboUpload(b,S,S,70+i,true);blit(fb,fa);}
-   log("checksum="+sample(a));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
+   const a=texture(),b=texture();allocMip(a,base,base,1);allocMip(b,base,base,1);fillMip(a,1,mip1,mip1,11);fillMip(b,1,mip1,mip1,12);
+   const fa=fbo(a,1),fb=fbo(b,1);clearFbo(fa,21);blit(fa,fb,mip1);log("checksum="+sample(b,1));
+   gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
+  }else if(n===1){
+   const a=texture(),b=texture();allocMip(a,base,base,2);allocMip(b,base,base,2);fillMip(a,2,mip2,mip2,31);fillMip(b,2,mip2,mip2,32);
+   const fa=fbo(a,2),fb=fbo(b,2);clearFbo(fa,41);blit(fa,fb,mip2);log("checksum="+sample(b,2));
+   gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
+  }else if(n===2){
+   const a=texture(),b=texture(),c=texture();allocMip(a,base,base,1);allocMip(b,base,base,1);allocMip(c,base,base,1);
+   fillMip(a,1,mip1,mip1,51);fillMip(b,1,mip1,mip1,52);const fa=fbo2(a,b,1),fb=fbo(c,1);clearFbo(fa,61);blit(fa,fb,mip1);log("checksum="+sample(c,1));
+   [fa,fb].forEach(x=>gl.deleteFramebuffer(x));[a,b,c].forEach(x=>gl.deleteTexture(x));
+  }else if(n===3){
+   const a=texture(),b=texture(),c=texture();allocMip(a,base,base,1);allocMip(b,base,base,1);allocMip(c,base,base,1);
+   const fa=fbo(a,1),fb=fbo(b,1),fc=fbo(c,1);clearFbo(fa,71);blit(fa,fb,mip1);uploadAgain(b,1,mip1,mip1,72);blit(fb,fc,mip1);log("checksum="+sample(c,1));
+   [fa,fb,fc].forEach(x=>gl.deleteFramebuffer(x));[a,b,c].forEach(x=>gl.deleteTexture(x));
+  }else{
+   const a=texture(),b=texture();allocMip(a,base,base,1);allocMip(b,base,base,1);const fa=fbo(a,1),fb=fbo(b,1);
+   for(let i=0;i<8;i++){clearFbo(fa,80+i);blit(fa,fb,mip1);uploadAgain(b,1,mip1,mip1,90+i);blit(fb,fa,mip1);}
+   log("checksum="+sample(a,1));gl.deleteFramebuffer(fa);gl.deleteFramebuffer(fb);gl.deleteTexture(a);gl.deleteTexture(b);
   }
-  const e=gl.getError();if(e)log("[GL ERROR] "+hex(e));else log("[PASS] no GL error");
+  const e=gl.getError();log(e?"[GL ERROR] "+hex(e):"[PASS] no GL error");
  }catch(e){log("[FAIL] "+e);}
  if(gl.isContextLost())log("[!!!] CONTEXT LOST");log("");
 }
