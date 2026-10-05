@@ -1,306 +1,224 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali / ANGLE WebGL2 baseline diagnostic v5</title>
+<title>Mali Texture Upload Regression v1</title>
 <style>
-body{background:#111;color:#eee;font:15px monospace;padding:16px;line-height:1.4}
-button{font:inherit;padding:12px 16px;margin:4px 4px 10px 0}
+body{font-family:monospace;background:#111;color:#eee;padding:16px}
+button{font-size:16px;padding:10px;margin:4px 0}
 pre{white-space:pre-wrap;word-break:break-word}
+.ok{color:#7f7}.bad{color:#f77}
 </style>
 </head>
 <body>
-<h2>Mali / ANGLE WebGL2 baseline diagnostic v5</h2>
-<p>Benign diagnostic. First establishes valid WebGL2 FBO baselines, then tests BASE_LEVEL and blit.</p>
-<button id="run">Run diagnostic</button>
+<h3>Mali Texture Upload Regression v1</h3>
+<button id="run">Run bounded matrix</button>
 <pre id="out">Ready.</pre>
 
 <script>
 "use strict";
-
 const out = document.getElementById("out");
-const log = s => { out.textContent += s + "\n"; console.log(s); };
-const clear = () => out.textContent = "";
+function log(s){ out.textContent += s + "\\n"; }
+function hex(x){ return "0x"+x.toString(16); }
 
-function statusName(gl,s){
-  const m={
-    [gl.FRAMEBUFFER_COMPLETE]:"FRAMEBUFFER_COMPLETE",
-    [gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT]:"FRAMEBUFFER_INCOMPLETE_ATTACHMENT",
-    [gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT]:"FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT",
-    [gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS]:"FRAMEBUFFER_INCOMPLETE_DIMENSIONS",
-    [gl.FRAMEBUFFER_UNSUPPORTED]:"FRAMEBUFFER_UNSUPPORTED"
-  };
-  return m[s] || ("0x"+s.toString(16));
+let gl;
+function setup(){
+  const c=document.createElement("canvas");
+  gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:false});
+  if(!gl) throw new Error("WebGL2 unavailable");
+  log("Renderer: "+gl.getParameter(gl.RENDERER));
+  log("Vendor: "+gl.getParameter(gl.VENDOR));
+  log("Version: "+gl.getParameter(gl.VERSION));
+  log("GLSL: "+gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+  log("");
 }
 
-function errName(gl,e){
-  const m={
-    [gl.NO_ERROR]:"NO_ERROR",
-    [gl.INVALID_ENUM]:"INVALID_ENUM",
-    [gl.INVALID_VALUE]:"INVALID_VALUE",
-    [gl.INVALID_OPERATION]:"INVALID_OPERATION",
-    [gl.OUT_OF_MEMORY]:"OUT_OF_MEMORY",
-    [gl.INVALID_FRAMEBUFFER_OPERATION]:"INVALID_FRAMEBUFFER_OPERATION"
-  };
-  return m[e] || ("0x"+e.toString(16));
+function err(label){
+  const e=gl.getError();
+  if(e!==gl.NO_ERROR) log("[!] "+label+" GL error="+hex(e));
+  return e;
 }
 
-function drain(gl){
-  const a=[]; let e;
-  while((e=gl.getError())!==gl.NO_ERROR)a.push(errName(gl,e));
+function makePixels(w,h,seed){
+  const a=new Uint8Array(w*h*4);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const i=(y*w+x)*4;
+      a[i]=(x*13+y*7+seed)&255;
+      a[i+1]=(x*3+y*17+seed*5)&255;
+      a[i+2]=(x^y^seed)&255;
+      a[i+3]=255;
+    }
+  }
   return a;
 }
 
-/*
- * Conservative texture allocation:
- * - RGBA / UNSIGNED_BYTE
- * - no mipmap filtering requirement
- * - explicitly allocate the exact level being attached
- */
-function tex(gl,w,h){
-  const t=gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  gl.texImage2D(
-    gl.TEXTURE_2D,0,gl.RGBA,w,h,0,
-    gl.RGBA,gl.UNSIGNED_BYTE,null
-  );
-  gl.bindTexture(gl.TEXTURE_2D,null);
-  return t;
-}
-
-function mipTex(gl,baseW,baseH,levels){
-  const t=gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST_MIPMAP_NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-
-  let w=baseW,h=baseH;
-  for(let l=0;l<levels;l++){
-    gl.texImage2D(
-      gl.TEXTURE_2D,l,gl.RGBA,w,h,0,
-      gl.RGBA,gl.UNSIGNED_BYTE,null
-    );
-    w=Math.max(1,w>>1);
-    h=Math.max(1,h>>1);
-  }
-  gl.bindTexture(gl.TEXTURE_2D,null);
-  return t;
-}
-
-function makeFbo(gl, attachments){
+function checksumTexture(tex,w,h){
   const f=gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-
-  for(const a of attachments){
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,a.attachment,
-      gl.TEXTURE_2D,a.texture,a.level
-    );
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+  const status=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(status!==gl.FRAMEBUFFER_COMPLETE){
+    gl.deleteFramebuffer(f);
+    return {status};
   }
-
-  const buffers=attachments.map(a=>a.attachment);
-  gl.drawBuffers(buffers);
-  return f;
-}
-
-function check(gl,name){
-  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  const ok=s===gl.FRAMEBUFFER_COMPLETE;
-  log((ok?"[PASS] ":"[FAIL] ")+name+" — "+statusName(gl,s));
-  return ok;
-}
-
-function deleteFbo(gl,f,...textures){
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  const p=new Uint8Array(w*h*4);
+  gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,p);
+  let s=0;
+  for(let i=0;i<p.length;i++) s=(s + p[i]*(i+1))>>>0;
   gl.deleteFramebuffer(f);
-  for(const t of textures)gl.deleteTexture(t);
-  drain(gl);
+  return {status,checksum:s};
 }
 
-function caseA(gl){
-  log("\n=== A: conservative single attachment baseline ===");
-  const t=tex(gl,64,64);
-  const f=makeFbo(gl,[{attachment:gl.COLOR_ATTACHMENT0,texture:t,level:0}]);
-  const ok=check(gl,"single 64x64 RGBA/UNSIGNED_BYTE level 0");
-  deleteFbo(gl,f,t);
-  return ok;
-}
-
-function caseB(gl){
-  log("\n=== B: explicit level-1 attachment baseline ===");
-  const t=mipTex(gl,64,64,2);
-  const f=makeFbo(gl,[{attachment:gl.COLOR_ATTACHMENT0,texture:t,level:1}]);
-  const ok=check(gl,"single 32x32 mip level 1");
-  deleteFbo(gl,f,t);
-  return ok;
-}
-
-function caseC(gl){
-  log("\n=== C: two equal-size color attachments ===");
-  const a=tex(gl,32,32);
-  const b=tex(gl,32,32);
-  const f=makeFbo(gl,[
-    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:0},
-    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:0}
-  ]);
-  const ok=check(gl,"two 32x32 color attachments");
-  deleteFbo(gl,f,a,b);
-  return ok;
-}
-
-function caseD(gl){
-  log("\n=== D: BASE_LEVEL=1 on one 64x64 texture ===");
-  const t=mipTex(gl,64,64,2);
-  gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-  gl.bindTexture(gl.TEXTURE_2D,null);
-
-  const f=makeFbo(gl,[{
-    attachment:gl.COLOR_ATTACHMENT0,texture:t,level:1
-  }]);
-
-  const ok=check(gl,"single attachment level 1 + BASE_LEVEL=1");
-  deleteFbo(gl,f,t);
-  return ok;
-}
-
-function caseE(gl){
-  log("\n=== E: two attachments + BASE_LEVEL=1 ===");
-  const a=mipTex(gl,64,64,2);
-  const b=mipTex(gl,64,64,2);
-
-  for(const t of [a,b]){
-    gl.bindTexture(gl.TEXTURE_2D,t);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-  }
-  gl.bindTexture(gl.TEXTURE_2D,null);
-
-  const f=makeFbo(gl,[
-    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:1},
-    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:1}
-  ]);
-
-  const ok=check(gl,"two 32x32 attachments + BASE_LEVEL=1");
-  deleteFbo(gl,f,a,b);
-  return ok;
-}
-
-function caseF(gl){
-  log("\n=== F: valid source/destination + glBlitFramebuffer ===");
-
-  const srcTex=mipTex(gl,64,64,2);
-  const a=mipTex(gl,64,64,2);
-  const b=mipTex(gl,64,64,2);
-
-  for(const t of [a,b]){
-    gl.bindTexture(gl.TEXTURE_2D,t);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-  }
-  gl.bindTexture(gl.TEXTURE_2D,null);
-
-  const src=makeFbo(gl,[{
-    attachment:gl.COLOR_ATTACHMENT0,texture:srcTex,level:1
-  }]);
-
-  const dst=makeFbo(gl,[
-    {attachment:gl.COLOR_ATTACHMENT0,texture:a,level:1},
-    {attachment:gl.COLOR_ATTACHMENT1,texture:b,level:1}
-  ]);
-
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
-  const srcStatus=gl.checkFramebufferStatus(gl.READ_FRAMEBUFFER);
-
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
-  const dstStatus=gl.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER);
-
-  log("source:      "+statusName(gl,srcStatus));
-  log("destination: "+statusName(gl,dstStatus));
-
-  let ok=false;
-  if(srcStatus===gl.FRAMEBUFFER_COMPLETE &&
-     dstStatus===gl.FRAMEBUFFER_COMPLETE){
-    drain(gl);
-    for(let i=0;i<50;i++){
-      gl.blitFramebuffer(
-        0,0,32,32,
-        0,0,32,32,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST
-      );
-    }
-    gl.finish();
-    const errors=drain(gl);
-    ok=errors.length===0;
-    log(ok
-      ? "[PASS] glBlitFramebuffer — no GL errors"
-      : "[FAIL] glBlitFramebuffer — "+errors.join(", "));
-  }else{
-    log("[SKIP] glBlitFramebuffer — source/destination FBO not complete");
-  }
-
-  deleteFbo(gl,src,srcTex);
-  deleteFbo(gl,dst,a,b);
-  return ok;
-}
-
-function run(){
-  clear();
-
-  const canvas=document.createElement("canvas");
-  canvas.width=64; canvas.height=64;
-
-  const gl=canvas.getContext("webgl2",{
-    antialias:false,
-    depth:false,
-    stencil:false,
-    preserveDrawingBuffer:false
-  });
-
-  if(!gl){
-    log("[FAIL] WebGL2 unavailable");
-    return;
-  }
-
-  log("Renderer: "+gl.getParameter(gl.RENDERER));
-  log("Vendor:   "+gl.getParameter(gl.VENDOR));
-  log("Version:  "+gl.getParameter(gl.VERSION));
-  log("GLSL:     "+gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
-
-  canvas.addEventListener("webglcontextlost",e=>{
-    e.preventDefault();
-    log("[!!!] WEBGL CONTEXT LOST");
-  });
-  canvas.addEventListener("webglcontextrestored",()=>{
-    log("[!!!] WEBGL CONTEXT RESTORED");
-  });
-
-  const results=[];
+function test(name,fn){
+  log("=== "+name+" ===");
   try{
-    results.push(["A",caseA(gl)]);
-    results.push(["B",caseB(gl)]);
-    results.push(["C",caseC(gl)]);
-    results.push(["D",caseD(gl)]);
-    results.push(["E",caseE(gl)]);
-    results.push(["F",caseF(gl)]);
+    gl.getError();
+    fn();
+    const e=gl.getError();
+    if(e===gl.NO_ERROR) log("[PASS] no GL error");
+    else log("[FAIL] GL error="+hex(e));
   }catch(e){
-    log("\n[!!!] Diagnostic aborted: "+(e.stack||e));
+    log("[EXCEPTION] "+e);
   }
-
-  log("\n=== SUMMARY ===");
-  for(const [n,ok] of results) log(n+": "+(ok?"PASS":"FAIL"));
-  log(gl.isContextLost()
-    ? "[!!!] WebGL context is LOST"
-    : "[+] WebGL context remains active");
+  if(gl.isContextLost()) log("[!!!] CONTEXT LOST");
+  log("");
 }
 
-document.getElementById("run").addEventListener("click",run);
+function uploadCase(label, opts){
+  test(label,()=>{
+    const w=opts.w, h=opts.h, level=opts.level||0;
+    const tw=Math.max(1,w>>level), th=Math.max(1,h>>level);
+    const tex=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+
+    const pixels=makePixels(tw,th,opts.seed||1);
+
+    if(opts.pbo){
+      const pbo=gl.createBuffer();
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,pbo);
+      gl.bufferData(gl.PIXEL_UNPACK_BUFFER,pixels,gl.STREAM_DRAW);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+      gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,tw,th,0,
+                    gl.RGBA,gl.UNSIGNED_BYTE,0);
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+      gl.deleteBuffer(pbo);
+    }else{
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+      gl.texImage2D(gl.TEXTURE_2D,level,gl.RGBA8,tw,th,0,
+                    gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    }
+
+    if(opts.sub){
+      const p2=makePixels(tw,th,(opts.seed||1)+77);
+      if(opts.pbo){
+        const pbo2=gl.createBuffer();
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,pbo2);
+        gl.bufferData(gl.PIXEL_UNPACK_BUFFER,p2,gl.STREAM_DRAW);
+        gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,tw,th,
+                         gl.RGBA,gl.UNSIGNED_BYTE,0);
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+        gl.deleteBuffer(pbo2);
+      }else{
+        gl.texSubImage2D(gl.TEXTURE_2D,level,0,0,tw,th,
+                         gl.RGBA,gl.UNSIGNED_BYTE,p2);
+      }
+    }
+
+    const e=gl.getError();
+    if(e!==gl.NO_ERROR) throw new Error("upload error "+hex(e));
+
+    // For level 0, attach and checksum. For nonzero levels, verify the
+    // texture remains usable without forcing an invalid framebuffer setup.
+    if(level===0){
+      const r=checksumTexture(tex,tw,th);
+      if(r.status!==gl.FRAMEBUFFER_COMPLETE)
+        throw new Error("FBO status "+hex(r.status));
+      log("[+] checksum="+r.checksum);
+    }else{
+      gl.bindTexture(gl.TEXTURE_2D,tex);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
+      const r=checksumTexture(tex,tw,th);
+      if(r.status!==gl.FRAMEBUFFER_COMPLETE)
+        throw new Error("nonzero-level FBO status "+hex(r.status));
+      log("[+] level="+level+" checksum="+r.checksum);
+    }
+
+    gl.deleteTexture(tex);
+  });
+}
+
+document.getElementById("run").onclick=()=>{
+  out.textContent="";
+  try{
+    setup();
+
+    log("=== Environment ===");
+    log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    log("MAX_COMBINED_TEXTURE_IMAGE_UNITS="+
+        gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS));
+    log("");
+
+    // Baseline: POT / level 0
+    uploadCase("A: TexImage2D POT level 0",{
+      w:64,h:64,level:0,pbo:false,sub:false,seed:11
+    });
+
+    // PBO upload baseline
+    uploadCase("B: TexImage2D POT level 0 + PBO",{
+      w:64,h:64,level:0,pbo:true,sub:false,seed:12
+    });
+
+    // TexSubImage2D baseline
+    uploadCase("C: TexImage2D + TexSubImage2D POT level 0",{
+      w:64,h:64,level:0,pbo:false,sub:true,seed:13
+    });
+
+    // NPOT upload path
+    uploadCase("D: TexImage2D NPOT level 0",{
+      w:63,h:47,level:0,pbo:false,sub:false,seed:14
+    });
+
+    // NPOT + PBO
+    uploadCase("E: TexImage2D NPOT level 0 + PBO",{
+      w:63,h:47,level:0,pbo:true,sub:false,seed:15
+    });
+
+    // Nonzero mip, with BASE_LEVEL making it the active level.
+    uploadCase("F: TexImage2D level 1 + BASE_LEVEL=1",{
+      w:64,h:64,level:1,pbo:false,sub:false,seed:16
+    });
+
+    // Nonzero mip + PBO.
+    uploadCase("G: TexImage2D level 1 + BASE_LEVEL=1 + PBO",{
+      w:64,h:64,level:1,pbo:true,sub:false,seed:17
+    });
+
+    // Nonzero mip + TexSubImage2D.
+    uploadCase("H: TexImage2D + TexSubImage2D level 1 + BASE_LEVEL=1",{
+      w:64,h:64,level:1,pbo:false,sub:true,seed:18
+    });
+
+    // NPOT + nonzero mip + PBO.
+    uploadCase("I: NPOT level 1 + BASE_LEVEL=1 + PBO",{
+      w:63,h:47,level:1,pbo:true,sub:true,seed:19
+    });
+
+    log("=== SUMMARY ===");
+    if(gl.isContextLost()) log("[!!!] WebGL context is LOST");
+    else log("[+] WebGL context remains active");
+    log("Look for: context loss, browser/tab crash, deterministic checksum mismatch,");
+    log("unexpected INVALID_OPERATION/OUT_OF_MEMORY, or a repeatable difference");
+    log("between PBO/non-PBO and POT/NPOT paths.");
+  }catch(e){
+    log("[FATAL] "+e);
+  }
+};
 </script>
 </body>
 </html>
