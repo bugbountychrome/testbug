@@ -1,63 +1,68 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Mali FBO State/Blit Regression v13</title>
+<title>ANGLE Mali FBO State Blit v13.1</title>
 <style>
-body{font-family:monospace;background:#111;color:#eee;padding:14px}
-button{display:block;font-size:15px;padding:10px;margin:6px 0}
-pre{white-space:pre-wrap}
+body{font-family:monospace;background:#111;color:#eee;padding:16px}
+button{display:block;width:100%;max-width:420px;font-size:16px;padding:12px;margin:8px 0}
+pre{white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
-<h3>ANGLE/Mali FBO State + Multi-Attachment + Blit v13</h3>
-<button onclick="run(0)">A — single attachment control</button>
-<button onclick="run(1)">B — 2 color attachments control</button>
-<button onclick="run(2)">C — BASE_LEVEL=1 + 2 attachments</button>
-<button onclick="run(3)">D — BASE_LEVEL toggle 0↔1 + blit</button>
-<button onclick="run(4)">E — repeated attach/state/blit ×20</button>
+<h3>ANGLE/Mali FBO State + Multi-Attachment + Blit v13.1</h3>
+<button id="a">A — single attachment control</button>
+<button id="b">B — 2 color attachments control</button>
+<button id="c">C — BASE_LEVEL=1 + 2 attachments</button>
+<button id="d">D — BASE_LEVEL toggle 0↔1 + blit</button>
+<button id="e">E — repeated attach/state/blit ×20</button>
 <pre id="out">Ready.</pre>
 
 <script>
+(function(){
 "use strict";
-const out=document.getElementById("out"), log=s=>out.textContent+=s+"\\n";
-const W=128,H=128;
-let gl;
 
-function hex(x){return "0x"+x.toString(16);}
-function err(where){
-  const e=gl.getError();
-  if(e!==gl.NO_ERROR)throw Error(where+" "+hex(e));
-}
+var out=document.getElementById("out");
+function log(s){out.textContent+=s+"\\n";}
+function hx(x){return "0x"+x.toString(16);}
+
+var gl=null, W=128, H=128;
+
 function init(){
   if(gl)return;
-  const c=document.createElement("canvas");c.width=W;c.height=H;
-  gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
-  if(!gl)throw Error("WebGL2 unavailable");
+  var canvas=document.createElement("canvas");
+  canvas.width=W; canvas.height=H;
+  gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
+  if(!gl)throw new Error("WebGL2 unavailable");
   log("Renderer: "+gl.getParameter(gl.RENDERER));
   log("Version: "+gl.getParameter(gl.VERSION));
   log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
 }
-function makeTex(w=W,h=H){
-  const t=gl.createTexture();
+
+function check(where){
+  var e=gl.getError();
+  if(e!==gl.NO_ERROR)throw new Error(where+" "+hx(e));
+}
+
+function texture(){
+  var t=gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST_MIPMAP_NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
 
-  // Explicitly allocate level 0 and level 1.
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
-  gl.texImage2D(gl.TEXTURE_2D,1,gl.RGBA8,w>>1,h>>1,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
-  err("texture allocation");
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,W,H,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texImage2D(gl.TEXTURE_2D,1,gl.RGBA8,W/2,H/2,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  check("texture allocation");
   return t;
 }
-function makeFBO(){
-  const f=gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
-  return f;
+
+function framebuffer(){
+  return gl.createFramebuffer();
 }
+
 function attach(f,t0,t1,level){
   gl.bindFramebuffer(gl.FRAMEBUFFER,f);
 
@@ -65,203 +70,182 @@ function attach(f,t0,t1,level){
     gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,
     gl.TEXTURE_2D,t0,level
   );
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,
-    gl.TEXTURE_2D,t1,level
-  );
-  gl.drawBuffers(t1 ? [gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1] :
-                       [gl.COLOR_ATTACHMENT0]);
 
-  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(t1){
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D,t1,level
+    );
+    gl.drawBuffers([
+      gl.COLOR_ATTACHMENT0,
+      gl.COLOR_ATTACHMENT1
+    ]);
+  }else{
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D,null,0
+    );
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  }
+
+  var s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   if(s!==gl.FRAMEBUFFER_COMPLETE)
-    throw Error("FBO "+hex(s));
-  err("attach");
+    throw new Error("FBO "+hx(s));
+
+  check("attach");
 }
-function fill(w,h,a,b,c){
+
+function clearFBO(w,h,r,g,b){
   gl.viewport(0,0,w,h);
-  gl.clearColor(a,b,c,1);
+  gl.clearColor(r,g,b,1);
   gl.clear(gl.COLOR_BUFFER_BIT);
-  err("clear");
+  check("clear");
 }
-function readPixel(){
-  const p=new Uint8Array(4);
-  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+
+function pixel(attachment){
+  var p=new Uint8Array(4);
+  gl.readBuffer(attachment);
   gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);
-  err("readPixels");
-  return (p[0]<<24 | p[1]<<16 | p[2]<<8 | p[3])>>>0;
+  check("readPixels");
+  return "["+p[0]+","+p[1]+","+p[2]+","+p[3]+"]";
 }
-function readAttachment1(){
-  const p=new Uint8Array(4);
-  gl.readBuffer(gl.COLOR_ATTACHMENT1);
-  gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);
-  err("readPixels attachment1");
-  return (p[0]<<24 | p[1]<<16 | p[2]<<8 | p[3])>>>0;
-}
+
 function blit(src,dst,w,h){
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
   gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
   gl.readBuffer(gl.COLOR_ATTACHMENT0);
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  gl.blitFramebuffer(0,0,w,h,0,0,w,h,gl.COLOR_BUFFER_BIT,gl.NEAREST);
-  err("blit");
+  gl.blitFramebuffer(
+    0,0,w,h,
+    0,0,w,h,
+    gl.COLOR_BUFFER_BIT,
+    gl.NEAREST
+  );
+  check("blit");
 }
-function state(){
-  return {
-    base:gl.getParameter(gl.TEXTURE_BINDING_2D),
-    read:gl.getParameter(gl.READ_FRAMEBUFFER_BINDING),
-    draw:gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING)
-  };
+
+function setBase(t,level){
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
+  check("BASE_LEVEL="+level);
 }
-function clean(fs,ts){
+
+function cleanup(fs,ts){
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   gl.bindTexture(gl.TEXTURE_2D,null);
-  fs.forEach(x=>gl.deleteFramebuffer(x));
-  ts.forEach(x=>gl.deleteTexture(x));
+  fs.forEach(function(x){gl.deleteFramebuffer(x);});
+  ts.forEach(function(x){gl.deleteTexture(x);});
 }
-function run(n){
-  init();
-  const names=[
-    "single attachment control",
-    "2 color attachments control",
-    "BASE_LEVEL=1 + 2 attachments",
-    "BASE_LEVEL toggle 0↔1 + blit",
-    "repeated attach/state/blit ×20"
-  ];
-  log("=== "+names[n]+" ===");
 
+function run(which){
   try{
-    let a,b,c,d,f,fd;
-    if(n===0){
-      a=makeTex();f=makeFBO();attach(f,a,null,0);
-      fill(W,H,.20,.30,.40);
-      log("pixel="+readPixel());
-      clean([f],[a]);
+    init();
+    log("=== TEST "+which+" ===");
 
-    }else if(n===1){
-      a=makeTex();b=makeTex();f=makeFBO();attach(f,a,b,0);
-      fill(W,H,.20,.30,.40);
-      log("attachment0="+readPixel());
-      log("attachment1="+readAttachment1());
-      clean([f],[a,b]);
+    var a,b,c,d,f,g;
 
-    }else if(n===2){
-      a=makeTex();b=makeTex();f=makeFBO();
-      gl.bindTexture(gl.TEXTURE_2D,a);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      gl.bindTexture(gl.TEXTURE_2D,b);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      err("set BASE_LEVEL=1");
+    if(which==="A"){
+      a=texture();
+      f=framebuffer();
+      attach(f,a,null,0);
+      clearFBO(W,H,.2,.3,.4);
+      log("pixel="+pixel(gl.COLOR_ATTACHMENT0));
+      cleanup([f],[a]);
+
+    }else if(which==="B"){
+      a=texture(); b=texture();
+      f=framebuffer();
+      attach(f,a,b,0);
+      clearFBO(W,H,.2,.3,.4);
+      log("attachment0="+pixel(gl.COLOR_ATTACHMENT0));
+      log("attachment1="+pixel(gl.COLOR_ATTACHMENT1));
+      cleanup([f],[a,b]);
+
+    }else if(which==="C"){
+      a=texture(); b=texture();
+      setBase(a,1);
+      setBase(b,1);
+      f=framebuffer();
       attach(f,a,b,1);
-      fill(W/2,H/2,.30,.20,.10);
-      log("attachment0="+readPixel());
-      log("attachment1="+readAttachment1());
-      clean([f],[a,b]);
+      clearFBO(W/2,H/2,.3,.2,.1);
+      log("attachment0="+pixel(gl.COLOR_ATTACHMENT0));
+      log("attachment1="+pixel(gl.COLOR_ATTACHMENT1));
+      cleanup([f],[a,b]);
 
-    }else if(n===3){
-      a=makeTex();b=makeTex();c=makeTex();d=makeTex();
-      f=makeFBO();fd=makeFBO();
+    }else if(which==="D"){
+      a=texture(); b=texture();
+      c=texture(); d=texture();
+      f=framebuffer(); g=framebuffer();
 
-      gl.bindTexture(gl.TEXTURE_2D,a);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
-      gl.bindTexture(gl.TEXTURE_2D,b);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
+      setBase(a,0); setBase(b,0);
       attach(f,a,b,0);
 
-      gl.bindTexture(gl.TEXTURE_2D,c);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      gl.bindTexture(gl.TEXTURE_2D,d);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      attach(fd,c,d,1);
+      setBase(c,1); setBase(d,1);
+      attach(g,c,d,1);
 
-      fill(W,H,.10,.40,.70);
-      blit(f,fd,W/2,H/2);
+      clearFBO(W,H,.1,.4,.7);
+      blit(f,g,W/2,H/2);
 
-      // Toggle source BASE_LEVEL after the blit, then restore.
-      gl.bindTexture(gl.TEXTURE_2D,a);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      gl.bindTexture(gl.TEXTURE_2D,b);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,1);
-      err("toggle source BASE_LEVEL=1");
+      setBase(a,1); setBase(b,1);
+      setBase(a,0); setBase(b,0);
 
-      gl.bindTexture(gl.TEXTURE_2D,a);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
-      gl.bindTexture(gl.TEXTURE_2D,b);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,0);
-      err("restore source BASE_LEVEL=0");
+      gl.bindFramebuffer(gl.FRAMEBUFFER,g);
+      log("destination0="+pixel(gl.COLOR_ATTACHMENT0));
+      log("destination1="+pixel(gl.COLOR_ATTACHMENT1));
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER,fd);
-      log("dst attachment0="+readPixel());
-      log("dst attachment1="+readAttachment1());
-      clean([f,fd],[a,b,c,d]);
+      cleanup([f,g],[a,b,c,d]);
 
     }else{
-      a=makeTex();b=makeTex();c=makeTex();d=makeTex();
-      f=makeFBO();fd=makeFBO();
+      a=texture(); b=texture();
+      c=texture(); d=texture();
+      f=framebuffer(); g=framebuffer();
 
-      for(let i=0;i<20;i++){
-        const level=i&1;
-        gl.bindTexture(gl.TEXTURE_2D,a);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
-        gl.bindTexture(gl.TEXTURE_2D,b);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
+      for(var i=0;i<20;i++){
+        var level=(i%2);
+        var sz=level?W/2:W;
+
+        setBase(a,level);
+        setBase(b,level);
         attach(f,a,b,level);
 
-        const v=(i+1)/21;
-        fill(level?W/2:W,H?level?H/2:H,v,.25,.75-v*.5);
+        clearFBO(sz,sz,((i+1)/21),.25,.5);
 
-        gl.bindTexture(gl.TEXTURE_2D,c);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
-        gl.bindTexture(gl.TEXTURE_2D,d);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
-        attach(fd,c,d,level);
+        setBase(c,level);
+        setBase(d,level);
+        attach(g,c,d,level);
 
-        blit(f,fd,level?W/2:W,level?H/2:H);
+        blit(f,g,sz,sz);
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER,fd);
-        const p=readPixel();
-        if((i===0)||(i===19))log("cycle "+(i+1)+" level="+level+" pixel="+p);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,g);
+        if(i===0 || i===19){
+          log("cycle "+(i+1)+" level="+level+
+              " p0="+pixel(gl.COLOR_ATTACHMENT0));
+        }
       }
-      clean([f,fd],[a,b,c,d]);
+
+      cleanup([f,g],[a,b,c,d]);
     }
 
-    err("final");
+    check("final");
     log("[PASS] no GL error");
   }catch(e){
-    log("[FAIL] "+e);
+    log("[FAIL] "+e.message);
     try{
       gl.bindFramebuffer(gl.FRAMEBUFFER,null);
       gl.bindTexture(gl.TEXTURE_2D,null);
-    }catch(_){}
-  }
-  if(gl.isContextLost())log("[!!!] CONTEXT LOST");
-  log("");
-}
-</script>
-</body>
-</html>,gl.UNSIGNED_BYTE,0
-        );
-        chk("cycle "+(i+1)+" texSubImage2D");
-
-        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
-        gl.deleteBuffer(pack.b);
-        gl.deleteBuffer(unpack);
-      }
-
-      log("texture checksum="+sampleTexture(dst));
-      cleanup([f],[src,dst],[]);
-    }
-
-    chk("final");
-    log("[PASS] no GL error");
-
-  }catch(e){
-    log("[FAIL] "+e);
-    cleanup([],[],[]);
+    }catch(ignore){}
   }
 
-  if(gl.isContextLost())
-    log("[!!!] CONTEXT LOST");
-
+  if(gl && gl.isContextLost())log("[!!!] CONTEXT LOST");
   log("");
 }
+
+document.getElementById("a").onclick=function(){run("A");};
+document.getElementById("b").onclick=function(){run("B");};
+document.getElementById("c").onclick=function(){run("C");};
+document.getElementById("d").onclick=function(){run("D");};
+document.getElementById("e").onclick=function(){run("E");};
+})();
 </script>
 </body>
 </html>
