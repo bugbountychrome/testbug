@@ -2,20 +2,19 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>FSA Rename Round-Trip Test</title>
 </head>
 
 <body>
 
 <button onclick="setup()">1. SETUP</button>
-<button onclick="removeOld()">2. REMOVE</button>
+<button onclick="removeFile()">2. HANDLE.REMOVE()</button>
 <button onclick="check()">3. CHECK</button>
 
 <pre id="log"></pre>
 
 <script>
-let dir = null;
-let oldFile = null;
+let dirHandle;
+let fileHandle;
 
 function log(x) {
   document.getElementById("log").textContent += x + "\n";
@@ -25,20 +24,30 @@ async function setup() {
   document.getElementById("log").textContent = "";
 
   try {
-    dir = await showDirectoryPicker({
+    dirHandle = await showDirectoryPicker({
       mode: "readwrite"
     });
 
     log("DIRECTORY: OK");
 
-    oldFile = await dir.getFileHandle("FSA_TEST.txt");
+    fileHandle =
+      await dirHandle.getFileHandle("FSA_TEST.txt");
 
-    log("OLD HANDLE: OK");
-    log("permission = " +
-      await oldFile.queryPermission({mode:"read"}));
+    log("FILE HANDLE: OK");
 
-    const f = await oldFile.getFile();
-    log("OLD CONTENT = " + await f.text());
+    log(
+      "read = " +
+      await fileHandle.queryPermission({mode:"read"})
+    );
+
+    log(
+      "readwrite = " +
+      await fileHandle.queryPermission({mode:"readwrite"})
+    );
+
+    const file = await fileHandle.getFile();
+
+    log("CONTENT = " + await file.text());
 
   } catch (e) {
     log("SETUP ERROR: " + e.name);
@@ -46,66 +55,75 @@ async function setup() {
   }
 }
 
-async function removeOld() {
+async function removeFile() {
   try {
-    if (!dir) {
-      log("RUN SETUP FIRST");
-      return;
-    }
-
-    await dir.removeEntry("FSA_TEST.txt");
 
     log("");
-    log("REMOVE: SUCCESS");
-    log("OLD FILE DELETED");
-    log("");
-    log("Sekarang buat file baru:");
-    log("FSA_TEST.txt");
-    log("dengan Termux:");
-    log("RECREATED_12345");
+    log("=== HANDLE.REMOVE ===");
+
+    await fileHandle.remove();
+
+    log("handle.remove(): SUCCESS");
 
   } catch (e) {
-    log("REMOVE ERROR: " + e.name);
+
+    log("handle.remove(): " + e.name);
     log(e.message);
+
   }
+
+  try {
+    log(
+      "read after remove = " +
+      await fileHandle.queryPermission({mode:"read"})
+    );
+
+    log(
+      "readwrite after remove = " +
+      await fileHandle.queryPermission({mode:"readwrite"})
+    );
+  } catch (e) {
+    log("permission check error: " + e.name);
+  }
+
+  try {
+    await fileHandle.getFile();
+    log("OLD HANDLE READ: SUCCESS");
+  } catch (e) {
+    log("OLD HANDLE READ: " + e.name);
+  }
+
+  log("");
+  log("Sekarang recreate FSA_TEST.txt dari Termux.");
 }
 
 async function check() {
+
   try {
-    log("");
-    log("=== BEFORE RENAME ===");
-
-    const newFile =
-      await dir.getFileHandle("FSA_TEST.txt");
-
-    log("NEW HANDLE: OK");
-
-    log("new permission = " +
-      await newFile.queryPermission({mode:"read"}));
-
-    const before = await newFile.getFile();
-
-    log("NEW CONTENT = " + await before.text());
 
     log("");
-    log("=== OLD HANDLE ===");
+    log("=== CHECK ===");
 
-    try {
-      const old = await oldFile.getFile();
-      log("OLD HANDLE READ = SUCCESS");
-      log("OLD CONTENT = " + await old.text());
-    } catch (e) {
-      log("OLD HANDLE READ = " + e.name);
-    }
+    log(
+      "old read = " +
+      await fileHandle.queryPermission({mode:"read"})
+    );
 
-    log("");
-    log("Sekarang rename file baru secara eksternal:");
-    log("FSA_TEST.txt -> ROUNDTRIP.txt");
-    log("ROUNDTRIP.txt -> FSA_TEST.txt");
+    log(
+      "old readwrite = " +
+      await fileHandle.queryPermission({mode:"readwrite"})
+    );
+
+    const file = await fileHandle.getFile();
+
+    log("OLD HANDLE READ: SUCCESS");
+    log("CONTENT = " + await file.text());
 
   } catch (e) {
-    log("CHECK ERROR: " + e.name);
+
+    log("OLD HANDLE READ: " + e.name);
     log(e.message);
+
   }
 }
 </script>
