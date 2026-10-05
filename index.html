@@ -1,189 +1,141 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ANGLE Transform Feedback Validation Regression v1</title>
+<title>ANGLE Transform Feedback Regression v2</title>
 <style>
 body{font:14px monospace;background:#111;color:#ddd;padding:12px}
 button{display:block;width:100%;margin:7px 0;padding:12px}
 .ok{color:#8f8}.bad{color:#f88}.info{color:#8cf}
 </style>
-<h3>ANGLE Transform Feedback validation regression v1</h3>
+<h3>ANGLE Transform Feedback Regression v2</h3>
 <div id="info"></div>
 <button id="all" type="button">RUN ALL 4 TESTS</button>
 <pre id="out"></pre>
 <script>
 "use strict";
+const VS=`#version 300 es
+in vec4 a; out vec4 tf;
+void main(){tf=a;gl_Position=a;}`;
+const FS=`#version 300 es
+precision highp float; out vec4 c;
+void main(){c=vec4(1.0);}`;
 
-function log(s,cls=""){
-  const d=document.createElement("div"); d.textContent=s;
-  if(cls)d.className=cls; out.appendChild(d);
-}
+function log(s,c=""){let d=document.createElement("div");d.textContent=s;if(c)d.className=c;out.appendChild(d)}
 function fresh(){
-  const c=document.createElement("canvas"); c.width=32;c.height=32;
-  const gl=c.getContext("webgl2",{antialias:false});
-  if(!gl)throw Error("WebGL2 unavailable");
-  return gl;
+ const c=document.createElement("canvas");c.width=32;c.height=32;
+ const g=c.getContext("webgl2",{antialias:false});
+ if(!g)throw Error("WebGL2 unavailable");return g
 }
-function en(gl,e){
-  return e===gl.NO_ERROR?"NO_ERROR":
-    e===gl.INVALID_ENUM?"INVALID_ENUM":
-    e===gl.INVALID_VALUE?"INVALID_VALUE":
-    e===gl.INVALID_OPERATION?"INVALID_OPERATION":
-    e===gl.INVALID_FRAMEBUFFER_OPERATION?"INVALID_FRAMEBUFFER_OPERATION":
-    e===gl.OUT_OF_MEMORY?"OUT_OF_MEMORY":"0x"+e.toString(16);
+function en(g,e){return e===g.NO_ERROR?"NO_ERROR":
+ e===g.INVALID_ENUM?"INVALID_ENUM":e===g.INVALID_VALUE?"INVALID_VALUE":
+ e===g.INVALID_OPERATION?"INVALID_OPERATION":e===g.OUT_OF_MEMORY?"OUT_OF_MEMORY":
+ "0x"+e.toString(16)}
+function drain(g){while(g.getError()!==g.NO_ERROR){}}
+function program(g){
+ let v=g.createShader(g.VERTEX_SHADER);g.shaderSource(v,VS);g.compileShader(v);
+ if(!g.getShaderParameter(v,g.COMPILE_STATUS))throw Error("VS compile");
+ let f=g.createShader(g.FRAGMENT_SHADER);g.shaderSource(f,FS);g.compileShader(f);
+ if(!g.getShaderParameter(f,g.COMPILE_STATUS))throw Error("FS compile");
+ let p=g.createProgram();g.attachShader(p,v);g.attachShader(p,f);
+ g.bindAttribLocation(p,0,"a");
+ g.transformFeedbackVaryings(p,["tf"],g.INTERLEAVED_ATTRIBS);
+ g.linkProgram(p);if(!g.getProgramParameter(p,g.LINK_STATUS))throw Error("link");
+ return p
 }
-function drain(gl){while(gl.getError()!==gl.NO_ERROR){}}
-
-function makeProgram(gl){
-  const vs=gl.createShader(gl.VERTEX_SHADER);
-  gl.shaderSource(vs,`#version 300 es
-    in vec4 a;
-    out vec4 tf;
-    void main(){ tf=a; gl_Position=a; }`);
-  gl.compileShader(vs);
-  if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))
-    throw Error("VS compile: "+gl.getShaderInfoLog(vs));
-
-  const fs=gl.createShader(gl.FRAGMENT_SHADER);
-  gl.shaderSource(fs,`#version 300 es
-    precision highp float;
-    out vec4 c;
-    void main(){c=vec4(1.0);}`);
-  gl.compileShader(fs);
-  if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))
-    throw Error("FS compile: "+gl.getShaderInfoLog(fs));
-
-  const p=gl.createProgram();
-  gl.attachShader(p,vs); gl.attachShader(p,fs);
-  gl.bindAttribLocation(p,0,"a");
-  gl.transformFeedbackVaryings(p,["tf"],gl.INTERLEAVED_ATTRIBS);
-  gl.linkProgram(p);
-  if(!gl.getProgramParameter(p,gl.LINK_STATUS))
-    throw Error("link: "+gl.getProgramInfoLog(p));
-  return p;
+function setup(g){
+ let p=program(g),b=g.createBuffer(),tf=g.createTransformFeedback();
+ g.bindBuffer(g.ARRAY_BUFFER,b);
+ g.bufferData(g.ARRAY_BUFFER,new Float32Array([
+  -.8,-.8,0,1, .8,-.8,0,1, 0,.8,0,1
+ ]),g.STATIC_DRAW);
+ g.bindBuffer(g.ARRAY_BUFFER,null);
+ g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
+ g.bindBufferBase(g.TRANSFORM_FEEDBACK_BUFFER,0,b);
+ g.useProgram(p);
+ g.bindBuffer(g.ARRAY_BUFFER,b);
+ g.enableVertexAttribArray(0);
+ g.vertexAttribPointer(0,4,g.FLOAT,false,0,0);
+ return {p,b,tf}
 }
-
-function makeBuffer(gl){
-  const b=gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER,b);
-  const data=new Float32Array([
-    -1,-1,0,1,  1,-1,0,1,  0,1,0,1
-  ]);
-  gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER,null);
-  return b;
-}
-
 function run(n){
-  out.textContent="";
-  let gl=null,prog=null,b=null,tf1=null,tf2=null;
-  try{
-    gl=fresh(); drain(gl);
-    prog=makeProgram(gl); b=makeBuffer(gl);
+ out.textContent="";
+ let g=null,s=null,tf2=null;
+ try{
+  g=fresh();drain(g);s=setup(g);let {p,b,tf}=s;
+  g.beginTransformFeedback(g.TRIANGLES);let e=g.getError();
+  if(e!==g.NO_ERROR)throw Error("beginTF "+en(g,e));
+  g.pauseTransformFeedback();e=g.getError();
+  if(e!==g.NO_ERROR)throw Error("pause "+en(g,e));
 
-    tf1=gl.createTransformFeedback();
-    tf2=gl.createTransformFeedback();
+  if(n===1){
+   g.resumeTransformFeedback();
+   log("control resume="+en(g,g.getError()));
+   g.endTransformFeedback();
+   log("end="+en(g,g.getError()));
+  } else {
+   tf2=g.createTransformFeedback();
+   g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf2);
+   e=g.getError();log("unbind/rebind transition="+en(g,e));
 
-    // TF1 owns the buffer.
-    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf1);
-    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER,0,b);
-    let e=gl.getError();
-    if(e!==gl.NO_ERROR)throw Error("bind TF1: "+en(gl,e));
+   if(n===2){
+    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
+    g.resumeTransformFeedback();
+    log("restore + resume="+en(g,g.getError()));
+    g.endTransformFeedback();
+    log("end="+en(g,g.getError()));
+   }
 
-    gl.useProgram(prog);
-    gl.enableVertexAttribArray(0);
-    gl.bindBuffer(gl.ARRAY_BUFFER,b);
-    gl.vertexAttribPointer(0,4,gl.FLOAT,false,0,0);
+   if(n===3){
+    // WebGL2-valid replacement for mapBufferRange:
+    // attempt to replace storage while the paused TF still references b.
+    g.bindBuffer(g.ARRAY_BUFFER,b);
+    g.bufferData(g.ARRAY_BUFFER,new Float32Array(32),g.DYNAMIC_DRAW);
+    log("bufferData while paused TF references buffer="+en(g,g.getError()));
+    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
+    g.resumeTransformFeedback();
+    log("restore + resume="+en(g,g.getError()));
+    g.endTransformFeedback();
+    log("end="+en(g,g.getError()));
+   }
 
-    gl.beginTransformFeedback(gl.TRIANGLES);
-    e=gl.getError();
-    if(e!==gl.NO_ERROR)throw Error("begin TF: "+en(gl,e));
+   if(n===4){
+    // More state churn: change ARRAY_BUFFER storage, read it back,
+    // restore TF, then resume and draw.
+    g.bindBuffer(g.ARRAY_BUFFER,b);
+    g.bufferData(g.ARRAY_BUFFER,new Float32Array(32),g.DYNAMIC_DRAW);
+    log("bufferData="+en(g,g.getError()));
 
-    gl.pauseTransformFeedback();
-    e=gl.getError();
-    if(e!==gl.NO_ERROR)throw Error("pause TF: "+en(gl,e));
+    const read=new Float32Array(4);
+    g.getBufferSubData(g.ARRAY_BUFFER,0,read);
+    log("getBufferSubData="+en(g,g.getError()));
 
-    if(n===1){
-      // Control: resume while the original TF remains bound.
-      gl.resumeTransformFeedback();
-    }else if(n===2){
-      // Core state-transition case: active/paused TF becomes unbound.
-      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
-      gl.resumeTransformFeedback();
-    }else if(n===3){
-      // Same transition, then attempt the forbidden buffer modification.
-      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
-      gl.bindBuffer(gl.ARRAY_BUFFER,b);
-      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(32),gl.DYNAMIC_DRAW);
-      // We expect validation to reject the modification while TF1 is active.
-    }else{
-      // Critical regression shape: unbind active paused TF, then try
-      // map/write, restore TF1, resume, and issue a draw.
-      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf2);
-      gl.bindBuffer(gl.ARRAY_BUFFER,b);
-      const mapped=gl.mapBufferRange(
-        gl.ARRAY_BUFFER,0,16,
-        gl.MAP_WRITE_BIT|gl.MAP_INVALIDATE_RANGE_BIT
-      );
-      const mapErr=gl.getError();
-      log("mapBufferRange="+en(gl,mapErr));
-      if(mapped) {
-        const u=new Float32Array(mapped.buffer,mapped.byteOffset,4);
-        u[0]=0.1;u[1]=0.2;u[2]=0.3;u[3]=1;
-        gl.unmapBuffer(gl.ARRAY_BUFFER);
-        log("unmapBuffer="+en(gl,gl.getError()));
-      }
+    g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,tf);
+    log("restore TF="+en(g,g.getError()));
+    g.resumeTransformFeedback();
+    log("resume="+en(g,g.getError()));
 
-      gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,tf1);
-      gl.resumeTransformFeedback();
-      log("resume="+en(gl,gl.getError()));
-
-      gl.drawArrays(gl.TRIANGLES,0,3);
-      log("draw="+en(gl,gl.getError()));
-      gl.endTransformFeedback();
-      log("end="+en(gl,gl.getError()));
-    }
-
-    e=gl.getError();
-    log("final getError="+en(gl,e));
-    gl.finish();
-    log("contextLost="+gl.isContextLost());
-
-    if(gl.isContextLost())
-      log("UNEXPECTED CONTEXT LOSS","bad");
-    else
-      log("PASS — no context loss","ok");
-
-  }catch(ex){
-    log("EXCEPTION: "+ex.message,"bad");
-  }finally{
-    try{
-      if(gl){
-        gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,null);
-        if(tf1)gl.deleteTransformFeedback(tf1);
-        if(tf2)gl.deleteTransformFeedback(tf2);
-        if(prog)gl.deleteProgram(prog);
-        if(b)gl.deleteBuffer(b);
-      }
-    }catch(_){}
+    g.drawArrays(g.TRIANGLES,0,3);
+    log("draw="+en(g,g.getError()));
+    g.endTransformFeedback();
+    log("end="+en(g,g.getError()));
+   }
   }
+  g.finish();
+  log("contextLost="+g.isContextLost());
+  log(g.isContextLost()?"UNEXPECTED CONTEXT LOSS":"PASS — no context loss",
+      g.isContextLost()?"bad":"ok");
+ }catch(x){log("EXCEPTION: "+x.message,"bad")}
+ finally{try{
+  if(g){g.bindTransformFeedback(g.TRANSFORM_FEEDBACK,null);
+   if(s){if(s.tf)g.deleteTransformFeedback(s.tf);g.deleteBuffer(s.b);g.deleteProgram(s.p)}
+   if(tf2)g.deleteTransformFeedback(tf2)}
+ }catch(_){}}
 }
-
 async function all(){
-  const btn=document.getElementById("all"); btn.disabled=true; out.textContent="";
-  try{
-    for(let i=1;i<=4;i++){
-      log("=== TEST "+i+" ===","info");
-      run(i);
-      await new Promise(r=>setTimeout(r,350));
-    }
-  }finally{btn.disabled=false}
+ let b=document.getElementById("all");b.disabled=true;out.textContent="";
+ try{for(let i=1;i<=4;i++){log("=== TEST "+i+" ===","info");run(i);await new Promise(r=>setTimeout(r,300))}}
+ finally{b.disabled=false}
 }
 document.getElementById("all").addEventListener("click",all);
-
-try{
- const g=fresh();
- info.textContent="WebGL2="+!!g+
-   " | renderer="+g.getParameter(g.RENDERER)+
-   " | version="+g.getParameter(g.VERSION);
-}catch(e){info.textContent=e.message}
+try{let g=fresh();info.textContent="WebGL2="+!!g+" | "+g.getParameter(g.RENDERER)+" | "+g.getParameter(g.VERSION)}
+catch(e){info.textContent=e.message}
 </script>
