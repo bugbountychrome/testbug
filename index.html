@@ -1,120 +1,82 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali GLES Blit Multi-Attachment / Base-Level v2</title>
-<canvas id=c width=64 height=64></canvas><pre id=o>starting...</pre>
+<title>Chrome Android MediaStream lifecycle regression</title>
+<style>
+body{font:15px system-ui,sans-serif;padding:16px}
+button{font-size:17px;padding:10px;margin:4px}
+#log{white-space:pre-wrap;background:#eee;padding:10px;border-radius:8px}
+</style>
+<h3>MediaStream lifecycle race test</h3>
+<button id="start">START</button>
+<button id="stop">STOP</button>
+<div id="log"></div>
 <script>
-'use strict';
-const out=document.querySelector('#o'), c=document.querySelector('#c');
-const log=s=>out.textContent+=s+'\\n';
-function err(gl,label){const e=gl.getError();log(label+': '+(e===gl.NO_ERROR?'NO_ERROR':'0x'+e.toString(16)));return e}
-function clear(gl){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT)}
-function makeTex(gl,level=0){
- const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
- gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,64,64,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
- if(level>0){
-   gl.texImage2D(gl.TEXTURE_2D,1,gl.RGBA8,32,32,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_BASE_LEVEL,level);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,level);
- }
- return t;
-}
-function fbo(gl,t0,t1){
- const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t0,0);
- if(t1)gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,t1,0);
- if(t1)gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
- else gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- return f;
-}
-function fill(gl,f,r,g,b){
- gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- gl.clearColor(r,g,b,1);gl.clear(gl.COLOR_BUFFER_BIT);
-}
-function readPixel(gl,f){
- gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- const p=new Uint8Array(4);gl.readBuffer(gl.COLOR_ATTACHMENT0);
- gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return [...p];
-}
-function blit(gl,src,dst){
- gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
- gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,dst);
- gl.readBuffer(gl.COLOR_ATTACHMENT0);
- gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- gl.blitFramebuffer(0,0,64,64,0,0,64,64,gl.COLOR_BUFFER_BIT,gl.NEAREST);
- return err(gl,'blit');
-}
-function check(label,a,b){
- const ok=a.every((v,i)=>v===b[i]);
- log(label+': '+(ok?'PASS':'MISMATCH '+a+' expected '+b));
- return ok;
-}
-const gl=c.getContext('webgl2',{antialias:false,preserveDrawingBuffer:true});
-if(!gl){log('NO WEBGL2');}
-else{
- const dbg=gl.getExtension('WEBGL_debug_renderer_info');
- log('WebGL2 OK');
- log('renderer='+(dbg?gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER)));
- log('version='+gl.getParameter(gl.VERSION));
- const srcTex=makeTex(gl), src=fbo(gl,srcTex);
- const a=makeTex(gl), b=makeTex(gl), multi=fbo(gl,a,b);
- const base=makeTex(gl,1), baseF=fbo(gl,base);
- const single=makeTex(gl), singleF=fbo(gl,single);
- const cases=[];
+const L=[];
+const out=document.querySelector('#log');
+function log(x){L.push(new Date().toISOString()+" "+x);out.textContent=L.slice(-80).join("\n");}
 
- // A: exact workaround trigger: >1 draw color attachment.
- fill(gl,src,1,0,0);fill(gl,multi,0,0,0);
- cases.push(['A multi-attachment',()=>blit(gl,src,multi),multi,[255,0,0,255]]);
+let stream=null, pc=null, running=false, timer=null, n=0;
 
- // B: exact second trigger: draw attachment texture base_level > 0.
- fill(gl,src,0,1,0);fill(gl,baseF,0,0,0);
- cases.push(['B base_level>0',()=>blit(gl,src,baseF),baseF,[0,255,0,255]]);
+async function cycle(){
+  if(!running) return;
+  try {
+    // Repeatedly create native MediaStream/MediaStreamTrack objects,
+    // attach callbacks, then tear them down while camera callbacks
+    // may still be in flight.
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:true,
+      video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}}
+    });
 
- // C: control: one attachment, base_level 0. Workaround should not be required.
- fill(gl,src,0,0,1);fill(gl,singleF,0,0,0);
- cases.push(['C control single/base0',()=>blit(gl,src,singleF),singleF,[0,0,255,255]]);
+    const tracks=[...stream.getTracks()];
+    for(const t of tracks){
+      t.onended=()=>log("track ended "+t.kind);
+      t.onmute=()=>log("track mute "+t.kind);
+      t.onunmute=()=>log("track unmute "+t.kind);
+    }
 
- // D: state transition multi -> single -> multi.
- cases.push(['D transition multi/single/multi',()=>{
-   fill(gl,src,1,1,0); blit(gl,src,multi); 
-   gl.bindFramebuffer(gl.FRAMEBUFFER,multi);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,null,0);
-   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-   err(gl,'D detach');
-   blit(gl,src,multi);
-   gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,b,0);
-   gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
-   return blit(gl,src,multi);
- },multi,[255,255,0,255]]);
+    pc=new RTCPeerConnection();
+    for(const t of tracks) pc.addTrack(t,stream);
 
- for(const [name,fn,target,expected] of cases){
-   try{
-     while(gl.getError()!==gl.NO_ERROR){}
-     const e=fn();
-     if(e!==gl.NO_ERROR){log(name+': GL_ERROR 0x'+e.toString(16));continue}
-     const p=readPixel(gl,target);check(name,p,expected);
-     err(gl,name+' final');
-   }catch(e){log(name+': EXCEPTION '+e)}
- }
- // Extra stress: repeated valid transitions, no intentional invalid calls.
- try{
-   for(let i=0;i<32;i++){
-     fill(gl,src,(i&1),((i>>1)&1),((i>>2)&1));
-     gl.bindFramebuffer(gl.FRAMEBUFFER,multi);
-     if(i&1){
-       gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,b,0);
-       gl.drawBuffers([gl.COLOR_ATTACHMENT0,gl.COLOR_ATTACHMENT1]);
-     }else{
-       gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT1,gl.TEXTURE_2D,null,0);
-       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-     }
-     blit(gl,src,multi);
-     if(gl.getError()!==gl.NO_ERROR)throw Error('iteration '+i);
-   }
-   log('E 32x multi/single transition: PASS');
- }catch(e){log('E: '+e)}
- log('DONE');
+    // Force negotiation/native WebRTC activity.
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // Teardown while native callbacks/tasks may still be queued.
+    for(const t of tracks) t.stop();
+    stream.getTracks().forEach(t=>{t.onended=null;t.onmute=null;t.onunmute=null});
+    stream=null;
+
+    pc.close();
+    pc=null;
+
+    n++;
+    if(n%5===0) log("cycles="+n+" alive");
+  } catch(e) {
+    log("exception: "+e.name+" "+e.message);
+    try{if(stream) stream.getTracks().forEach(t=>t.stop())}catch(_){}
+    try{if(pc) pc.close()}catch(_){}
+    stream=null; pc=null;
+  }
+
+  if(running) timer=setTimeout(cycle,0);
 }
+
+document.querySelector('#start').onclick=()=>{
+  if(running)return;
+  if(!navigator.mediaDevices?.getUserMedia){
+    log("getUserMedia unavailable"); return;
+  }
+  running=true;n=0;log("START origin="+location.origin);
+  cycle();
+};
+
+document.querySelector('#stop').onclick=()=>{
+  running=false;
+  clearTimeout(timer);
+  try{if(stream)stream.getTracks().forEach(t=>t.stop())}catch(_){}
+  try{if(pc)pc.close()}catch(_){}
+  stream=null;pc=null;
+  log("STOP cycles="+n);
+};
 </script>
