@@ -2,14 +2,15 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>FSA Test</title>
+  <title>FSA Permission Test</title>
 </head>
 
 <body>
 
 <button onclick="setup()">1. SETUP FILE</button>
-<button onclick="removeFile()">2. HANDLE.REMOVE()</button>
-<button onclick="check()">3. CHECK</button>
+<button onclick="grantWrite()">2. GRANT READWRITE</button>
+<button onclick="removeFile()">3. HANDLE.REMOVE()</button>
+<button onclick="check()">4. CHECK</button>
 
 <pre id="log"></pre>
 
@@ -21,6 +22,11 @@ function log(x) {
   document.getElementById("log").textContent += x + "\n";
 }
 
+
+// =========================
+// 1. SETUP
+// =========================
+
 async function setup() {
 
   document.getElementById("log").textContent = "";
@@ -31,7 +37,8 @@ async function setup() {
 
     const files = await showOpenFilePicker({
       multiple: false,
-      mode: "readwrite"
+      types: [],
+      excludeAcceptAllOption: false
     });
 
     fileHandle = files[0];
@@ -67,6 +74,56 @@ async function setup() {
 }
 
 
+// =========================
+// 2. GRANT READWRITE
+// =========================
+
+async function grantWrite() {
+
+  if (!fileHandle) {
+    log("ERROR: SETUP FILE terlebih dahulu");
+    return;
+  }
+
+  try {
+
+    log("");
+    log("=== REQUEST READWRITE ===");
+
+    const result =
+      await fileHandle.requestPermission({
+        mode: "readwrite"
+      });
+
+    log("requestPermission = " + result);
+
+    log(
+      "read = " +
+      await fileHandle.queryPermission({
+        mode: "read"
+      })
+    );
+
+    log(
+      "readwrite = " +
+      await fileHandle.queryPermission({
+        mode: "readwrite"
+      })
+    );
+
+  } catch (e) {
+
+    log("GRANT ERROR: " + e.name);
+    log(e.message);
+
+  }
+}
+
+
+// =========================
+// 3. HANDLE.REMOVE
+// =========================
+
 async function removeFile() {
 
   if (!fileHandle) {
@@ -90,6 +147,7 @@ async function removeFile() {
 
   }
 
+
   try {
 
     log(
@@ -112,9 +170,11 @@ async function removeFile() {
 
   }
 
+
   try {
 
-    const file = await fileHandle.getFile();
+    const file =
+      await fileHandle.getFile();
 
     log("OLD HANDLE READ: SUCCESS");
     log("CONTENT = " + await file.text());
@@ -127,6 +187,10 @@ async function removeFile() {
 
 }
 
+
+// =========================
+// 4. CHECK
+// =========================
 
 async function check() {
 
@@ -160,9 +224,11 @@ async function check() {
 
   }
 
+
   try {
 
-    const file = await fileHandle.getFile();
+    const file =
+      await fileHandle.getFile();
 
     log("OLD HANDLE READ: SUCCESS");
     log("CONTENT = " + await file.text());
