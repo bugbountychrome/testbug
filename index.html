@@ -1,197 +1,417 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mali Pixel Pack/Unpack PBO Regression v11</title>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mali PBO Pack/Unpack Regression v12</title>
 <style>
 body{font-family:monospace;background:#111;color:#eee;padding:14px}
-button{display:block;font-size:15px;padding:10px;margin:5px 0}
+button{display:block;font-size:15px;padding:10px;margin:6px 0}
 pre{white-space:pre-wrap}
-</style></head>
+</style>
+</head>
 <body>
-<h3>Mali PIXEL_PACK_BUFFER → readPixels → PIXEL_UNPACK_BUFFER v11</h3>
-<button onclick="run(0)">A: readPixels → PBO → texture</button>
-<button onclick="run(1)">B: oversized PACK PBO → texture</button>
-<button onclick="run(2)">C: PACK → UNPACK same PBO data</button>
-<button onclick="run(3)">D: NPOT PACK → UNPACK</button>
-<button onclick="run(4)">E: repeated PACK/UNPACK ×10</button>
+<h3>Mali PIXEL_PACK / PIXEL_UNPACK PBO Regression v12</h3>
+<button onclick="run(0)">A — readPixels → PACK PBO → CPU verify</button>
+<button onclick="run(1)">B — PACK PBO → UNPACK PBO → texture</button>
+<button onclick="run(2)">C — PACK → GPU buffer copy → UNPACK → texture</button>
+<button onclick="run(3)">D — NPOT 127×95 PACK/UNPACK</button>
+<button onclick="run(4)">E — repeated PACK/UNPACK ×10</button>
 <pre id="out">Ready.</pre>
+
 <script>
 "use strict";
-const out=document.getElementById("out"), log=s=>out.textContent+=s+"\\n";
-let gl,prog,vao,loc; const W=128,H=128,R=64;
 
-function init(){
- if(gl)return;
- const c=document.createElement("canvas");c.width=R;c.height=R;
- gl=c.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true});
- if(!gl)throw Error("WebGL2 unavailable");
- log("Renderer: "+gl.getParameter(gl.RENDERER));
- log("Version: "+gl.getParameter(gl.VERSION));
- log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
+const out=document.getElementById("out");
+const log=s=>out.textContent+=s+"\\n";
+const W=128,H=128,CW=64,CH=64;
+let gl,prog,vao,texLoc;
 
- const vs=gl.createShader(gl.VERTEX_SHADER);
- gl.shaderSource(vs,`#version 300 es
- in vec2 p;in vec2 uv;out vec2 v;
- void main(){v=uv;gl_Position=vec4(p,0.,1.);}`);
- gl.compileShader(vs);
- if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(vs));
-
- const fs=gl.createShader(gl.FRAGMENT_SHADER);
- gl.shaderSource(fs,`#version 300 es
- precision highp float;uniform sampler2D t;in vec2 v;out vec4 o;
- void main(){o=texture(t,v);}`);
- gl.compileShader(fs);
- if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(fs));
-
- prog=gl.createProgram();gl.attachShader(prog,vs);gl.attachShader(prog,fs);gl.linkProgram(prog);
- if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(prog));
-
- vao=gl.createVertexArray();gl.bindVertexArray(vao);
- const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
- gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([
- -1,-1,0,0, 1,-1,1,0, -1,1,0,1,
- -1,1,0,1, 1,-1,1,0, 1,1,1,1]),gl.STATIC_DRAW);
- const p=gl.getAttribLocation(prog,"p"),u=gl.getAttribLocation(prog,"uv");
- gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,16,0);
- gl.enableVertexAttribArray(u);gl.vertexAttribPointer(u,2,gl.FLOAT,false,16,8);
- loc=gl.getUniformLocation(prog,"t");
-}
-
-function tex(w,h){
- const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
- gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
- gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
- let e=gl.getError();if(e)throw Error("tex "+hex(e));return t;
-}
 function hex(x){return "0x"+x.toString(16);}
-function fbo(t){
- const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
- gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
- gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
- const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
- if(s!==gl.FRAMEBUFFER_COMPLETE)throw Error("FBO "+hex(s));
- return f;
+function chk(where){
+  const e=gl.getError();
+  if(e!==gl.NO_ERROR) throw Error(where+" "+hex(e));
 }
-function render(f,w,h,seed){
- gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.viewport(0,0,w,h);
- gl.clearColor(((seed*37)&255)/255,((seed*71)&255)/255,((seed*113)&255)/255,1);
- gl.clear(gl.COLOR_BUFFER_BIT);
- const e=gl.getError();if(e)throw Error("clear "+hex(e));
-}
-function checksumBytes(a){
- let s=0;for(let i=0;i<a.length;i++)s=(s+a[i]*(i+1))>>>0;return s>>>0;
-}
-function packRead(w,h,extra){
- const n=w*h*4;
- const b=gl.createBuffer();gl.bindBuffer(gl.PIXEL_PACK_BUFFER,b);
- gl.bufferData(gl.PIXEL_PACK_BUFFER,extra?n*2+4096:n,gl.STREAM_READ);
- gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
- let e=gl.getError();if(e)throw Error("readPixels "+hex(e));
- return {b,n};
-}
-function uploadFromPack(texObj,w,h,srcBuf,n){
- gl.bindBuffer(gl.PIXEL_PACK_BUFFER,srcBuf);
- const arr=new Uint8Array(n);
- gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,arr);
- const up=gl.createBuffer();
- gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,up);
- gl.bufferData(gl.PIXEL_UNPACK_BUFFER,n,gl.STREAM_DRAW);
- gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,arr);
- gl.bindTexture(gl.TEXTURE_2D,texObj);
- gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
- const e=gl.getError();
- gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
- gl.deleteBuffer(up);
- if(e)throw Error("texSubImage2D "+hex(e));
-}
-function uploadDirectPackToUnpack(texObj,w,h,srcBuf,n){
- gl.bindBuffer(gl.PIXEL_PACK_BUFFER,srcBuf);
- const up=gl.createBuffer();
- gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,up);
- gl.bufferData(gl.PIXEL_UNPACK_BUFFER,n,gl.COPY_READ_BUFFER);
- // Copy PACK data to UNPACK through COPY_READ_BUFFER/COPY_WRITE_BUFFER.
- gl.bindBuffer(gl.COPY_READ_BUFFER,srcBuf);
- gl.bindBuffer(gl.COPY_WRITE_BUFFER,up);
- gl.copyBufferSubData(gl.COPY_READ_BUFFER,gl.COPY_WRITE_BUFFER,0,0,n);
- gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
- gl.bindBuffer(gl.COPY_READ_BUFFER,null);
- gl.bindBuffer(gl.COPY_WRITE_BUFFER,null);
- gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,up);
- gl.bindTexture(gl.TEXTURE_2D,texObj);
- gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0);
- const e=gl.getError();
- gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);gl.deleteBuffer(up);
- if(e)throw Error("copyBuffer/texSub "+hex(e));
-}
-function sample(t){
- gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,R,R);
- gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(prog);gl.bindVertexArray(vao);
- gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,0);
- gl.drawArrays(gl.TRIANGLES,0,6);
- let e=gl.getError();if(e)throw Error("draw "+hex(e));
- const p=new Uint8Array(R*R*4);
- gl.readPixels(0,0,R,R,gl.RGBA,gl.UNSIGNED_BYTE,p);e=gl.getError();
- if(e)throw Error("sample read "+hex(e));
- return checksumBytes(p);
-}
-function cleanup(fs,ts,bs){
- if(fs)fs.forEach(x=>gl.deleteFramebuffer(x));
- if(ts)ts.forEach(x=>gl.deleteTexture(x));
- if(bs)bs.forEach(x=>gl.deleteBuffer(x));
- gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
- gl.bindBuffer(gl.COPY_READ_BUFFER,null);gl.bindBuffer(gl.COPY_WRITE_BUFFER,null);
-}
-function run(n){
- init();
- const names=[
- "readPixels → PBO → texture",
- "oversized PACK PBO → texture",
- "PACK → UNPACK same PBO data",
- "NPOT PACK → UNPACK",
- "repeated PACK/UNPACK ×10"
- ];
- log("=== "+names[n]+" ===");
- try{
-  let w=W,h=H,src,dst,fs,b,nbytes;
+function init(){
+  if(gl)return;
 
-  if(n===0){
-   src=tex(w,h);dst=tex(w,h);fs=fbo(src);render(fs,w,h,7);
-   ({b,n:nbytes}=packRead(w,h,false));
-   uploadFromPack(dst,w,h,b,nbytes);
-   log("checksum="+sample(dst));cleanup([fs],[src,dst],[b]);
-  }else if(n===1){
-   src=tex(w,h);dst=tex(w,h);fs=fbo(src);render(fs,w,h,13);
-   ({b,n:nbytes}=packRead(w,h,true));
-   uploadFromPack(dst,w,h,b,nbytes);
-   log("checksum="+sample(dst));cleanup([fs],[src,dst],[b]);
-  }else if(n===2){
-   src=tex(w,h);dst=tex(w,h);fs=fbo(src);render(fs,w,h,19);
-   ({b,n:nbytes}=packRead(w,h,false));
-   uploadDirectPackToUnpack(dst,w,h,b,nbytes);
-   log("checksum="+sample(dst));cleanup([fs],[src,dst],[b]);
-  }else if(n===3){
-   w=127;h=95;src=tex(w,h);dst=tex(w,h);fs=fbo(src);render(fs,w,h,29);
-   ({b,n:nbytes}=packRead(w,h,true));
-   uploadDirectPackToUnpack(dst,w,h,b,nbytes);
-   gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
-   log("checksum="+sample(dst));cleanup([fs],[src,dst],[b]);
-  }else{
-   w=128;h=128;src=tex(w,h);dst=tex(w,h);fs=fbo(src);render(fs,w,h,37);
-   for(let i=0;i<10;i++){
-    ({b,n:nbytes}=packRead(w,h,i%2===0));
-    uploadDirectPackToUnpack(dst,w,h,b,nbytes);
-    gl.deleteBuffer(b);b=null;
-   }
-   log("checksum="+sample(dst));cleanup([fs],[src,dst],[]);
-  }
-  const e=gl.getError();log(e?"[GL ERROR] "+hex(e):"[PASS] no GL error");
- }catch(e){
-  log("[FAIL] "+e);
-  try{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);}catch(_){}
- }
- if(gl.isContextLost())log("[!!!] CONTEXT LOST");
- log("");
+  const c=document.createElement("canvas");
+  c.width=CW;c.height=CH;
+
+  gl=c.getContext("webgl2",{
+    antialias:false,
+    preserveDrawingBuffer:true
+  });
+  if(!gl)throw Error("WebGL2 unavailable");
+
+  log("Renderer: "+gl.getParameter(gl.RENDERER));
+  log("Version: "+gl.getParameter(gl.VERSION));
+  log("MAX_TEXTURE_SIZE="+gl.getParameter(gl.MAX_TEXTURE_SIZE));
+
+  const vs=gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs,`#version 300 es
+    in vec2 p;
+    in vec2 uv;
+    out vec2 v;
+    void main(){v=uv;gl_Position=vec4(p,0.0,1.0);}`);
+  gl.compileShader(vs);
+  if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))
+    throw Error(gl.getShaderInfoLog(vs));
+
+  const fs=gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs,`#version 300 es
+    precision highp float;
+    uniform sampler2D t;
+    in vec2 v;
+    out vec4 o;
+    void main(){o=texture(t,v);}`);
+  gl.compileShader(fs);
+  if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS))
+    throw Error(gl.getShaderInfoLog(fs));
+
+  prog=gl.createProgram();
+  gl.attachShader(prog,vs);
+  gl.attachShader(prog,fs);
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS))
+    throw Error(gl.getProgramInfoLog(prog));
+
+  vao=gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  const b=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([
+    -1,-1,0,0,  1,-1,1,0,  -1,1,0,1,
+    -1,1,0,1,   1,-1,1,0,   1,1,1,1
+  ]),gl.STATIC_DRAW);
+
+  const p=gl.getAttribLocation(prog,"p");
+  const u=gl.getAttribLocation(prog,"uv");
+
+  gl.enableVertexAttribArray(p);
+  gl.vertexAttribPointer(p,2,gl.FLOAT,false,16,0);
+
+  gl.enableVertexAttribArray(u);
+  gl.vertexAttribPointer(u,2,gl.FLOAT,false,16,8);
+
+  texLoc=gl.getUniformLocation(prog,"t");
+  chk("init");
 }
-</script></body></html>
+
+function makeTexture(w,h){
+  const t=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,t);
+
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+
+  gl.texImage2D(
+    gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,
+    gl.RGBA,gl.UNSIGNED_BYTE,null
+  );
+  chk("texImage2D "+w+"x"+h);
+  return t;
+}
+
+function makeFBO(t,w,h){
+  const f=gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,t,0
+  );
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+  const s=gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(s!==gl.FRAMEBUFFER_COMPLETE)
+    throw Error("FBO "+hex(s));
+
+  gl.viewport(0,0,w,h);
+  return f;
+}
+
+function render(f,w,h,seed){
+  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.viewport(0,0,w,h);
+
+  gl.clearColor(
+    ((seed*37)&255)/255,
+    ((seed*71)&255)/255,
+    ((seed*113)&255)/255,
+    1
+  );
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  chk("render");
+}
+
+function checksum(a){
+  let s=0;
+  for(let i=0;i<a.length;i++)
+    s=(s+(a[i]*(i+1)))>>>0;
+  return s>>>0;
+}
+
+/*
+ * PACK PBO:
+ * readPixels(..., offset) is legal when PIXEL_PACK_BUFFER is bound.
+ * We deliberately unbind it before any client-memory readPixels.
+ */
+function packRead(w,h,oversized){
+  const bytes=w*h*4;
+  const b=gl.createBuffer();
+
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,b);
+  gl.bufferData(
+    gl.PIXEL_PACK_BUFFER,
+    oversized ? bytes+8192 : bytes,
+    gl.STREAM_READ
+  );
+  chk("PACK bufferData");
+
+  gl.readPixels(
+    0,0,w,h,
+    gl.RGBA,gl.UNSIGNED_BYTE,
+    0
+  );
+  chk("readPixels → PACK PBO");
+
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+  return {b,bytes};
+}
+
+/* Read PACK PBO into CPU memory. */
+function readPackCPU(b,bytes){
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,b);
+  const a=new Uint8Array(bytes);
+  gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,a);
+  chk("getBufferSubData PACK");
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+  return a;
+}
+
+/* CPU → UNPACK PBO → texture. */
+function uploadCPUToTexture(t,w,h,a){
+  const bytes=w*h*4;
+  const u=gl.createBuffer();
+
+  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,u);
+  gl.bufferData(gl.PIXEL_UNPACK_BUFFER,bytes,gl.STREAM_DRAW);
+  chk("UNPACK bufferData");
+
+  gl.bufferSubData(gl.PIXEL_UNPACK_BUFFER,0,a);
+  chk("UNPACK bufferSubData");
+
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texSubImage2D(
+    gl.TEXTURE_2D,0,0,0,w,h,
+    gl.RGBA,gl.UNSIGNED_BYTE,0
+  );
+  chk("texSubImage2D from UNPACK PBO");
+
+  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+  return u;
+}
+
+/* PACK PBO → GPU copy → UNPACK PBO. */
+function copyPackToUnpack(pack,bytes){
+  const unpack=gl.createBuffer();
+
+  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+
+  gl.bindBuffer(gl.COPY_READ_BUFFER,pack);
+  gl.bindBuffer(gl.COPY_WRITE_BUFFER,unpack);
+  gl.bufferData(gl.COPY_WRITE_BUFFER,bytes,gl.STREAM_DRAW);
+  chk("COPY bufferData");
+
+  gl.copyBufferSubData(
+    gl.COPY_READ_BUFFER,
+    gl.COPY_WRITE_BUFFER,
+    0,0,bytes
+  );
+  chk("copyBufferSubData PACK→UNPACK");
+
+  gl.bindBuffer(gl.COPY_READ_BUFFER,null);
+  gl.bindBuffer(gl.COPY_WRITE_BUFFER,null);
+
+  return unpack;
+}
+
+/* Texture → default framebuffer → client-memory readPixels.
+   All PBO bindings are explicitly cleared first. */
+function sampleTexture(t){
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+  gl.bindBuffer(gl.COPY_READ_BUFFER,null);
+  gl.bindBuffer(gl.COPY_WRITE_BUFFER,null);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.viewport(0,0,CW,CH);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.useProgram(prog);
+  gl.bindVertexArray(vao);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.uniform1i(texLoc,0);
+
+  gl.drawArrays(gl.TRIANGLES,0,6);
+  chk("sample draw");
+
+  /* Critical: PACK PBO is unbound, so this is client-memory readback. */
+  const p=new Uint8Array(CW*CH*4);
+  gl.readPixels(
+    0,0,CW,CH,
+    gl.RGBA,gl.UNSIGNED_BYTE,p
+  );
+  chk("sample readPixels");
+
+  return checksum(p);
+}
+
+function cleanup(fs,ts,bs){
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+  gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+  gl.bindBuffer(gl.COPY_READ_BUFFER,null);
+  gl.bindBuffer(gl.COPY_WRITE_BUFFER,null);
+
+  (fs||[]).forEach(x=>gl.deleteFramebuffer(x));
+  (ts||[]).forEach(x=>gl.deleteTexture(x));
+  (bs||[]).forEach(x=>gl.deleteBuffer(x));
+}
+
+function run(n){
+  init();
+
+  const names=[
+    "readPixels → PACK PBO → CPU verify",
+    "PACK PBO → UNPACK PBO → texture",
+    "PACK → GPU buffer copy → UNPACK → texture",
+    "NPOT 127×95 PACK/UNPACK",
+    "repeated PACK/UNPACK ×10"
+  ];
+
+  log("=== "+names[n]+" ===");
+
+  try{
+    let w=W,h=H,src,dst,f,pack,unpack,a;
+
+    if(n===0){
+      src=makeTexture(w,h);
+      f=makeFBO(src,w,h);
+      render(f,w,h,7);
+
+      pack=packRead(w,h,false);
+      a=readPackCPU(pack.b,pack.bytes);
+
+      log("PACK checksum="+checksum(a));
+      log("[PASS] PACK readback");
+
+      cleanup([f],[src],[pack.b]);
+
+    }else if(n===1){
+      src=makeTexture(w,h);
+      dst=makeTexture(w,h);
+      f=makeFBO(src,w,h);
+      render(f,w,h,13);
+
+      pack=packRead(w,h,true);
+      a=readPackCPU(pack.b,pack.bytes);
+
+      uploadCPUToTexture(dst,w,h,a);
+      log("texture checksum="+sampleTexture(dst));
+
+      cleanup([f],[src,dst],[pack.b]);
+
+    }else if(n===2){
+      src=makeTexture(w,h);
+      dst=makeTexture(w,h);
+      f=makeFBO(src,w,h);
+      render(f,w,h,19);
+
+      pack=packRead(w,h,false);
+      unpack=copyPackToUnpack(pack.b,pack.bytes);
+
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,unpack);
+      gl.bindTexture(gl.TEXTURE_2D,dst);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,0,0,0,w,h,
+        gl.RGBA,gl.UNSIGNED_BYTE,0
+      );
+      chk("GPU-copy UNPACK → texSubImage2D");
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+
+      log("texture checksum="+sampleTexture(dst));
+
+      cleanup([f],[src,dst],[pack.b,unpack]);
+
+    }else if(n===3){
+      w=127;h=95;
+      src=makeTexture(w,h);
+      dst=makeTexture(w,h);
+      f=makeFBO(src,w,h);
+      render(f,w,h,29);
+
+      pack=packRead(w,h,true);
+      unpack=copyPackToUnpack(pack.b,pack.bytes);
+
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,unpack);
+      gl.bindTexture(gl.TEXTURE_2D,dst);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,0,0,0,w,h,
+        gl.RGBA,gl.UNSIGNED_BYTE,0
+      );
+      chk("NPOT texSubImage2D");
+
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+      log("texture checksum="+sampleTexture(dst));
+
+      cleanup([f],[src,dst],[pack.b,unpack]);
+
+    }else{
+      w=128;h=128;
+      src=makeTexture(w,h);
+      dst=makeTexture(w,h);
+      f=makeFBO(src,w,h);
+      render(f,w,h,37);
+
+      for(let i=0;i<10;i++){
+        pack=packRead(w,h,(i&1)===0);
+        unpack=copyPackToUnpack(pack.b,pack.bytes);
+
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,unpack);
+        gl.bindTexture(gl.TEXTURE_2D,dst);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,0,0,0,w,h,
+          gl.RGBA,gl.UNSIGNED_BYTE,0
+        );
+        chk("cycle "+(i+1)+" texSubImage2D");
+
+        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER,null);
+        gl.deleteBuffer(pack.b);
+        gl.deleteBuffer(unpack);
+      }
+
+      log("texture checksum="+sampleTexture(dst));
+      cleanup([f],[src,dst],[]);
+    }
+
+    chk("final");
+    log("[PASS] no GL error");
+
+  }catch(e){
+    log("[FAIL] "+e);
+    cleanup([],[],[]);
+  }
+
+  if(gl.isContextLost())
+    log("[!!!] CONTEXT LOST");
+
+  log("");
+}
+</script>
+</body>
+</html>
