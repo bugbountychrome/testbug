@@ -1,52 +1,34 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width">
 
-<h3>Android WebGPU Boundary Test</h3>
+<button onclick="test()">TEST FILE SYSTEM ACCESS</button>
 <pre id="log"></pre>
 
 <script>
-const log = x => {
+const log = x =>
   document.querySelector("#log").textContent += x + "\n";
-};
 
-(async () => {
-  if (!navigator.gpu) {
-    log("WebGPU: NOT SUPPORTED");
+async function test() {
+  log("origin = " + location.origin);
+
+  if (!window.showOpenFilePicker) {
+    log("showOpenFilePicker: NOT SUPPORTED");
     return;
   }
 
-  log("WebGPU: SUPPORTED");
+  log("showOpenFilePicker: SUPPORTED");
 
   try {
-    const adapter = await navigator.gpu.requestAdapter();
-
-    if (!adapter) {
-      log("Adapter: NONE");
-      return;
-    }
-
-    log("Adapter: OK");
-
-    const info = await adapter.requestAdapterInfo?.();
-
-    if (info) {
-      log("vendor: " + info.vendor);
-      log("architecture: " + info.architecture);
-      log("device: " + info.device);
-      log("description: " + info.description);
-    }
-
-    const device = await adapter.requestDevice();
-
-    log("Device: OK");
-
-    device.lost.then(info => {
-      log("DEVICE LOST: " + info.reason);
-      log(info.message || "");
+    const handles = await showOpenFilePicker({
+      multiple: false
     });
 
+    log("PICKER RETURNED");
+    log("handles = " + handles.length);
+
   } catch (e) {
-    log("ERROR: " + e);
+    log("ERROR: " + e.name);
+    log(e.message);
   }
-})();
+}
 </script>
