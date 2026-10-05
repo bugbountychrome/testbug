@@ -2,84 +2,89 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width">
-  <title>FSA Permission Test</title>
+  <title>FSA Read Grant Test</title>
 </head>
 
 <body>
 
-<button onclick="testPermission()">TEST FILE SYSTEM ACCESS</button>
+<button onclick="setup()">1. PILIH FOLDER</button>
+<button onclick="readFile()">2. BACA FILE</button>
+<button onclick="resetLog()">CLEAR</button>
 
 <pre id="log"></pre>
 
 <script>
-let handle = null;
+let dirHandle = null;
+let fileHandle = null;
 
-function log(text) {
-  document.getElementById("log").textContent += text + "\n";
+function log(x) {
+  document.getElementById("log").textContent += x + "\n";
 }
 
-async function testPermission() {
+function resetLog() {
   document.getElementById("log").textContent = "";
+}
+
+async function setup() {
+  resetLog();
 
   try {
     log("Origin: " + location.origin);
 
-    if (!window.showOpenFilePicker) {
-      log("showOpenFilePicker: NOT SUPPORTED");
+    dirHandle = await window.showDirectoryPicker();
+
+    log("DIRECTORY HANDLE: OK");
+
+    fileHandle = await dirHandle.getFileHandle(
+      "FSA_TEST.txt"
+    );
+
+    log("FILE HANDLE: OK");
+    log("name: " + fileHandle.name);
+
+    const permission = await fileHandle.queryPermission({
+      mode: "read"
+    });
+
+    log("permission: " + permission);
+
+  } catch (e) {
+    log("ERROR: " + e.name);
+    log(e.message);
+  }
+}
+
+async function readFile() {
+  try {
+
+    if (!fileHandle) {
+      log("No file handle. Run SETUP first.");
       return;
     }
 
-    log("showOpenFilePicker: SUPPORTED");
+    log("");
+    log("=== READING ===");
 
-    // Pilih file dummy milik sendiri
-    const result = await showOpenFilePicker({
-      multiple: false
-    });
-
-    handle = result[0];
-
-    log("HANDLE CREATED");
-    log("kind: " + handle.kind);
-    log("name: " + handle.name);
-
-    // Cek permission
-    const query = await handle.queryPermission({
+    const permission = await fileHandle.queryPermission({
       mode: "read"
     });
 
-    log("queryPermission: " + query);
+    log("permission: " + permission);
 
-    // Request permission
-    const request = await handle.requestPermission({
-      mode: "read"
-    });
-
-    log("requestPermission: " + request);
-
-    // Ambil file
-    const file = await handle.getFile();
+    const file = await fileHandle.getFile();
 
     log("getFile: SUCCESS");
-    log("file.name: " + file.name);
-    log("file.size: " + file.size);
-    log("file.type: " + file.type);
+    log("name: " + file.name);
+    log("size: " + file.size);
 
-    // Baca sedikit metadata saja
-    const buffer = await file.slice(0, 16).arrayBuffer();
+    const text = await file.text();
 
-    const bytes = [...new Uint8Array(buffer)]
-      .map(x => x.toString(16).padStart(2, "0"))
-      .join(" ");
-
-    log("first 16 bytes: " + bytes);
-
-    log("");
-    log("=== TEST COMPLETE ===");
+    log("CONTENT: " + text);
 
   } catch (e) {
 
-    log("ERROR: " + e.name);
-    log("MESSAGE: " + e.message);
+    log("READ ERROR: " + e.name);
+    log(e.message);
 
   }
 }
