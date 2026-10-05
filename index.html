@@ -1,57 +1,68 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Edge External Protocol Boundary Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edge InPrivate Permission Test</title>
 </head>
 
 <body>
-  <h2>External Protocol Boundary Test</h2>
+  <h2>Edge Location Permission Test</h2>
 
-  <button onclick="topLevel()">
-    1. TOP-LEVEL MAILTO
-  </button>
+  <button onclick="testLocation()">TEST LOCATION</button>
 
-  <br><br>
-
-  <button onclick="sandboxed()">
-    2. SANDBOXED IFRAME MAILTO
-  </button>
-
-  <br><br>
-
-  <pre id="result">Ready</pre>
+  <pre id="result">Belum dites.</pre>
 
   <script>
-    function topLevel() {
-      document.getElementById("result").textContent =
-        "Launching top-level mailto...";
+    async function testLocation() {
+      const result = document.getElementById("result");
 
-      location.href = "mailto:test@example.com";
-    }
+      result.textContent = "Checking permission...\n";
 
-    function sandboxed() {
-      document.getElementById("result").textContent =
-        "Creating sandboxed iframe...";
+      if (!navigator.geolocation) {
+        result.textContent += "Geolocation API NOT available";
+        return;
+      }
 
-      const iframe = document.createElement("iframe");
+      try {
+        const permission = await navigator.permissions.query({
+          name: "geolocation"
+        });
 
-      iframe.sandbox = "allow-scripts";
-      iframe.style.display = "none";
+        result.textContent +=
+          "Permission state: " + permission.state + "\n\n";
 
-      document.body.appendChild(iframe);
+        permission.onchange = () => {
+          result.textContent +=
+            "Permission changed → " + permission.state + "\n";
+        };
 
-      iframe.srcdoc = `
-        <!doctype html>
-        <html>
-        <body>
-          <script>
-            location.href = "mailto:test@example.com";
-          <\/script>
-        </body>
-        </html>
-      `;
+        navigator.geolocation.getCurrentPosition(
+          position => {
+            result.textContent +=
+              "SUCCESS\n" +
+              "Latitude: " + position.coords.latitude + "\n" +
+              "Longitude: " + position.coords.longitude + "\n" +
+              "Accuracy: " + position.coords.accuracy + "m\n";
+          },
+
+          error => {
+            result.textContent +=
+              "ERROR\n" +
+              "Code: " + error.code + "\n" +
+              "Message: " + error.message + "\n";
+          },
+
+          {
+            enableHighAccuracy: false,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+
+      } catch (e) {
+        result.textContent +=
+          "EXCEPTION: " + e + "\n";
+      }
     }
   </script>
 </body>
