@@ -8,10 +8,10 @@ pre{white-space:pre-wrap;background:#eee;padding:10px}
 </style>
 <h2>WebAuthn lifecycle / navigation test</h2>
 <p>Safe regression test. It never exports credentials or attempts to bypass WebAuthn.</p>
-<button id="start">1. Start WebAuthn ceremony</button>
-<button id="nav">2. Navigate to state B</button>
-<button id="back">3. Return to state A</button>
-<button id="repeat">4. Start second ceremony</button>
+<button id="startBtn">1. Start WebAuthn ceremony</button>
+<button id="navBtn">2. Navigate to state B</button>
+<button id="backBtn">3. Return to state A</button>
+<button id="repeatBtn">4. Start second ceremony</button>
 <pre id="log"></pre>
 <script>
 const out=document.querySelector("#log");
@@ -37,10 +37,10 @@ async function start(label){
       " state="+sessionStorage.getItem("state"));
  }
 }
-start.onclick=()=>{sessionStorage.setItem("state","A");startWeb();};
+document.querySelector("#startBtn").onclick=()=>{sessionStorage.setItem("state","A");startWeb();};
 async function startWeb(){await start("A/create");}
-nav.onclick=()=>{sessionStorage.setItem("state","B");history.pushState({state:"B"},"","?state=B");log("NAVIGATION: state=B origin="+location.origin);};
-back.onclick=()=>{sessionStorage.setItem("state","A");history.pushState({state:"A"},"","?state=A");log("NAVIGATION: state=A origin="+location.origin);};
-repeat.onclick=()=>start("A/second-create");
+document.querySelector("#navBtn").onclick=()=>{sessionStorage.setItem("state","B");history.pushState({state:"B"},"","?state=B");log("NAVIGATION: state=B origin="+location.origin);};
+document.querySelector("#backBtn").onclick=()=>{sessionStorage.setItem("state","A");history.pushState({state:"A"},"","?state=A");log("NAVIGATION: state=A origin="+location.origin);};
+document.querySelector("#repeatBtn").onclick=()=>start("A/second-create");
 log("Ready. Secure origin="+location.origin);
 </script>
