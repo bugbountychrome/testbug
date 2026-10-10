@@ -1,102 +1,41 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Demo Login</title>
-  <style>
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: Arial, sans-serif;
-      background: #f4f6f8;
-    }
-
-    .login-box {
-      width: 350px;
-      padding: 30px;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(0,0,0,.12);
-    }
-
-    h2 {
-      margin: 0 0 24px;
-      text-align: center;
-    }
-
-    label {
-      display: block;
-      margin: 12px 0 6px;
-      font-size: 14px;
-    }
-
-    input {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid #ccc;
-      border-radius: 7px;
-      font-size: 15px;
-    }
-
-    button {
-      width: 100%;
-      margin-top: 20px;
-      padding: 12px;
-      border: 0;
-      border-radius: 7px;
-      background: #2563eb;
-      color: white;
-      font-size: 15px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: #1d4ed8;
-    }
-
-    #result {
-      margin-top: 15px;
-      text-align: center;
-      font-size: 14px;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Opera Mini Popup Policy Test</title>
 </head>
 <body>
-
-  <div class="login-box">
-    <h2>Demo Login</h2>
-
-    <form id="loginForm">
-      <label for="username">Username</label>
-      <input id="username" name="username" type="text"
-             autocomplete="username" required>
-
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password"
-             autocomplete="current-password" required>
-
-      <button type="submit">Sign in</button>
-    </form>
-
-    <div id="result"></div>
-  </div>
+  <h2>Popup Policy Test</h2>
+  <p>Wait 5 seconds. Do not touch the screen.</p>
+  <pre id="out">Waiting...</pre>
 
   <script>
-    document.getElementById("loginForm").addEventListener("submit", function(e) {
-      e.preventDefault();
+    let count = 0;
+    const results = [];
 
-      const username = document.getElementById("username").value;
+    function attempt() {
+      count++;
 
-      document.getElementById("result").textContent =
-        "Demo login submitted for: " + username;
-    });
+      const w = window.open(
+        'https://example.com/?popup_test=' + count,
+        '_blank'
+      );
+
+      results.push(
+        'Attempt ' + count + ': ' +
+        (w ? 'handle returned' : 'blocked/null')
+      );
+
+      document.getElementById('out').textContent =
+        results.join('\n');
+
+      if (count < 5) {
+        setTimeout(attempt, 1000);
+      }
+    }
+
+    setTimeout(attempt, 1500);
   </script>
-
 </body>
 </html>
