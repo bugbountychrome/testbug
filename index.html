@@ -2,40 +2,55 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Opera Mini Popup Policy Test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Opera Mini Permission Boundary Test</title>
 </head>
 <body>
-  <h2>Popup Policy Test</h2>
-  <p>Wait 5 seconds. Do not touch the screen.</p>
-  <pre id="out">Waiting...</pre>
+  <h2>Permission Boundary Test</h2>
+  <p>Checks camera and microphone permission handling.</p>
+  <pre id="result">Starting test...</pre>
 
   <script>
-    let count = 0;
-    const results = [];
+    const out = document.getElementById('result');
 
-    function attempt() {
-      count++;
+    async function test() {
+      out.textContent =
+        'Secure context: ' + window.isSecureContext +
+        '\ngetUserMedia available: ' +
+        !!(navigator.mediaDevices &&
+           navigator.mediaDevices.getUserMedia) +
+        '\nRequesting permission...';
 
-      const w = window.open(
-        'https://example.com/?popup_test=' + count,
-        '_blank'
-      );
+      if (!navigator.mediaDevices?.getUserMedia) {
+        out.textContent +=
+          '\nUNAVAILABLE: getUserMedia is not supported here.';
+        return;
+      }
 
-      results.push(
-        'Attempt ' + count + ': ' +
-        (w ? 'handle returned' : 'blocked/null')
-      );
+      try {
+        const stream =
+          await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: true
+          });
 
-      document.getElementById('out').textContent =
-        results.join('\n');
+        out.textContent +=
+          '\nRESULT: STREAM GRANTED' +
+          '\nTracks: ' +
+          stream.getTracks().map(t =>
+            t.kind + '=' + t.readyState
+          ).join(', ');
 
-      if (count < 5) {
-        setTimeout(attempt, 1000);
+        stream.getTracks().forEach(t => t.stop());
+        out.textContent += '\nAll tracks stopped immediately.';
+      } catch (e) {
+        out.textContent +=
+          '\nRESULT: ' + e.name +
+          '\nDetails: ' + e.message;
       }
     }
 
-    setTimeout(attempt, 1500);
+    test();
   </script>
 </body>
 </html>
