@@ -1,31 +1,153 @@
-
-<!doctype html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chrome Android FSA Probe</title>
-<h3>File System Access API Probe</h3>
-<pre id="out">Checking...</pre>
-<button id="pick">Select test file</button>
+<title>Opera GX Fullscreen PoC</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;padding:20px;
+  display:grid;place-items:center;
+  background:#10131a;color:#f4f6fb;
+  font:16px/1.5 system-ui,sans-serif
+}
+main{width:min(100%,400px)}
+h1{font-size:24px}
+p{color:#c0c8d8}
+button{
+  width:100%;padding:14px;margin-top:12px;
+  border:0;border-radius:10px;
+  background:#ff174f;color:white;
+  font-size:16px;font-weight:bold
+}
+#demo{display:none;width:100%}
+#demo.active{display:block}
+.mock-bar{
+  width:min(100%,280px);
+  margin:0 auto 18px;padding:6px 9px;
+  border-radius:8px;background:#e9edf3;
+  border:1px solid #8792a4;color:#17202c;
+  font-size:12px;line-height:1.25;
+  overflow-wrap:anywhere
+}
+.mock-label{
+  display:block;margin-bottom:3px;
+  font-size:9px;font-weight:bold;
+  color:#586476;letter-spacing:.04em
+}
+.card{
+  max-width:340px;margin:auto;padding:20px;
+  border-radius:14px;background:#fff;color:#17202c
+}
+.card p{color:#53647d;font-size:13px}
+label{display:block;margin:12px 0 5px;font-size:14px}
+input{
+  width:100%;padding:11px;border-radius:7px;
+  border:1px solid #8a98aa;font-size:16px
+}
+input:disabled{background:#e2e6ed}
+.note{font-size:12px;color:#53647d}
+.secondary{background:#303a4a}
+#status{font-size:13px;color:#c0c8d8}
+</style>
+</head>
+<body>
+
+<main id="landing">
+  <h1>Opera GX Android Fullscreen UI PoC</h1>
+  <p>
+    Uji perilaku notifikasi fullscreen dan keyboard
+    pada browser Android.
+  </p>
+  <p>
+    <strong>Catatan:</strong> address bar pada demo berikut
+    adalah elemen HTML, bukan address bar browser asli.
+  </p>
+  <button id="go">GO — Mulai tes</button>
+  <p id="status" role="status"></p>
+</main>
+
+<section id="demo">
+  <div class="mock-bar">
+    <span class="mock-label">
+      SIMULATED ADDRESS BAR — DEMO ONLY
+    </span>
+    <span>accounts.google.com</span>
+  </div>
+
+  <div class="card">
+    <h2>Demo sign-in</h2>
+    <p>Halaman simulasi lokal. Tidak mengirim atau menyimpan data.</p>
+
+    <label for="demo-user">Demo text field</label>
+    <input id="demo-user" placeholder="Kolom pengujian"
+           autocomplete="off">
+
+    <label for="demo-password">Password field</label>
+    <input id="demo-password" type="password"
+           placeholder="Dinonaktifkan" disabled>
+
+    <p class="note">
+      Ini hanya simulasi UI. Bukan halaman login asli.
+      Tidak ada kredensial yang dikumpulkan.
+    </p>
+  </div>
+
+  <button class="secondary" id="exit">Keluar dari fullscreen</button>
+  <p id="demo-status" role="status"></p>
+</section>
+
 <script>
-const out = document.querySelector("#out");
+const landing = document.getElementById('landing');
+const demo = document.getElementById('demo');
+const status = document.getElementById('status');
+const demoStatus = document.getElementById('demo-status');
+const userInput = document.getElementById('demo-user');
 
-out.textContent = [
-  "isSecureContext: " + isSecureContext,
-  "showOpenFilePicker: " + typeof window.showOpenFilePicker,
-  "showDirectoryPicker: " + typeof window.showDirectoryPicker,
-  "showSaveFilePicker: " + typeof window.showSaveFilePicker,
-].join("\n");
+document.getElementById('go').addEventListener('click', async () => {
+  landing.style.display = 'none';
+  demo.classList.add('active');
 
-document.querySelector("#pick").onclick = async () => {
   try {
-    if (!window.showOpenFilePicker) {
-      out.textContent += "\nPicker API unavailable";
-      return;
+    if (!document.fullscreenElement &&
+        document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+      demoStatus.textContent =
+        'Permintaan fullscreen berhasil. Amati notifikasi browser.';
+    } else {
+      demoStatus.textContent =
+        'Fullscreen API tidak tersedia atau fullscreen sudah aktif.';
     }
-    const [handle] = await showOpenFilePicker();
-    out.textContent += "\nSelected: " + handle.name;
-    out.textContent += "\nHandle type: " + handle.kind;
-  } catch (e) {
-    out.textContent += "\nResult: " + e.name + ": " + e.message;
+  } catch (error) {
+    demoStatus.textContent =
+      'Fullscreen ditolak: ' + error.name;
   }
-};
+
+  setTimeout(() => {
+    userInput.focus({preventScroll:true});
+  }, 250);
+});
+
+document.getElementById('exit').addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  } catch (_) {}
+
+  demo.classList.remove('active');
+  landing.style.display = '';
+  status.textContent = 'Tes selesai.';
+});
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && demo.classList.contains('active')) {
+    demoStatus.textContent =
+      'Fullscreen berakhir. Halaman demo masih aktif.';
+  }
+});
 </script>
+
+</body>
+</html>
