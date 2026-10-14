@@ -1,98 +1,67 @@
-
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Chromium window.name Persistence PoC</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      line-height: 1.5;
-      overflow-wrap: anywhere;
-    }
-    pre {
-      padding: 14px;
-      background: #eee;
-      color: #111;
-      border-radius: 6px;
-      white-space: pre-wrap;
-    }
-    button {
-      padding: 10px;
-      margin: 4px 0;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>window.name — Destination Test</title>
+<style>
+body{font:16px sans-serif;margin:20px;line-height:1.5}
+pre{background:#eee;color:#111;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
 </head>
 <body>
-  <h2>Chromium window.name Persistence PoC</h2>
+<h2>Chromium window.name — Destination B</h2>
 
-  <p><b>Destination URL:</b></p>
-  <pre id="url"></pre>
+<p>Destination URL:</p>
+<pre id="url"></pre>
 
-  <p><b>Received window.name:</b></p>
-  <pre id="name"></pre>
+<p>Received window.name:</p>
+<pre id="value"></pre>
 
-  <p><b>Result:</b></p>
-  <pre id="result"></pre>
+<p>Marker comparison:</p>
+<pre id="result"></pre>
 
-  <p><b>Page lifecycle:</b></p>
-  <pre id="lifecycle"></pre>
+<p>Page lifecycle:</p>
+<pre id="events"></pre>
 
-  <button id="refresh">Reload destination</button>
-  <button id="clear">Clear window.name</button>
+<script>
+const EXPECTED = "OMNIBOX-TEST-5812";
+const records = [];
 
-  <script>
-    const expectedMarker = "BB-POC-92741";
-    const lifecycle = [];
+function render() {
+  const value = window.name;
 
-    function render() {
-      const value = window.name;
+  document.getElementById("url").textContent = location.href;
+  document.getElementById("value").textContent = JSON.stringify(value);
 
-      document.getElementById("url").textContent =
-        location.href;
+  document.getElementById("result").textContent =
+    value === EXPECTED ? "MATCH: marker received" :
+    value === "" ? "EMPTY: window.name was cleared" :
+    "DIFFERENT: received another value";
 
-      document.getElementById("name").textContent =
-        JSON.stringify(value);
+  document.getElementById("events").textContent =
+    records.join("\n");
+}
 
-      document.getElementById("result").textContent =
-        value === expectedMarker
-          ? "MARKER PERSISTED: expected marker received"
-          : value === ""
-            ? "window.name is empty"
-            : "A different window.name value was received";
+window.addEventListener("pageshow", event => {
+  records.push(
+    new Date().toISOString() +
+    " | pageshow.persisted=" + event.persisted +
+    " | window.name=" + JSON.stringify(window.name)
+  );
+  render();
+});
 
-      document.getElementById("lifecycle").textContent =
-        lifecycle.join("\n");
-    }
+window.addEventListener("pagehide", event => {
+  records.push(
+    new Date().toISOString() +
+    " | pagehide.persisted=" + event.persisted +
+    " | window.name=" + JSON.stringify(window.name)
+  );
+  render();
+});
 
-    function record(event) {
-      lifecycle.push(
-        new Date().toISOString() + " | " + event +
-        " | window.name=" + JSON.stringify(window.name)
-      );
-      render();
-    }
-
-    document.getElementById("refresh").onclick = () => {
-      location.reload();
-    };
-
-    document.getElementById("clear").onclick = () => {
-      window.name = "";
-      record("Manually cleared");
-    };
-
-    window.addEventListener("pageshow", event => {
-      record("pageshow; persisted=" + event.persisted);
-    });
-
-    window.addEventListener("pagehide", event => {
-      record("pagehide; persisted=" + event.persisted);
-    });
-
-    render();
-  </script>
+render();
+</script>
 </body>
 </html>
