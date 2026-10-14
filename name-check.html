@@ -1,8 +1,19 @@
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<h3>window.name — Cross-site result</h3>
-<pre id="out"></pre>
+<h3>GitHub Pages — window.name History Test</h3>
+<pre id="out">Memeriksa...</pre>
 <script>
-document.getElementById('out').textContent =
-  'window.name = ' + (window.name || '(kosong)');
+function report(eventName, persisted = '') {
+  document.getElementById('out').textContent +=
+    eventName + (persisted !== '' ? ' persisted=' + persisted : '') +
+    '\nwindow.name = ' + (window.name || '(kosong)') + '\n\n';
+}
+document.getElementById('out').textContent = '';
+window.addEventListener('pageshow', e => {
+  report('pageshow', e.persisted);
+});
+window.addEventListener('pagehide', e => {
+  report('pagehide', e.persisted);
+});
+report('script');
 </script>
