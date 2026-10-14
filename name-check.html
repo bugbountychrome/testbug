@@ -4,93 +4,76 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>window.name Clearing Test</title>
+  <title>Chromium window.name Persistence PoC</title>
   <style>
     body {
-      font-family: sans-serif;
-      max-width: 720px;
-      margin: 24px auto;
-      padding: 0 16px;
+      font-family: Arial, sans-serif;
+      margin: 20px;
       line-height: 1.5;
-    }
-    button {
-      padding: 12px;
-      margin: 4px 0;
+      overflow-wrap: anywhere;
     }
     pre {
-      padding: 12px;
+      padding: 14px;
       background: #eee;
       color: #111;
+      border-radius: 6px;
       white-space: pre-wrap;
-      overflow-wrap: anywhere;
+    }
+    button {
+      padding: 10px;
+      margin: 4px 0;
     }
   </style>
 </head>
 <body>
-  <h2>window.name Clearing Test</h2>
-  <p>Origin: <code id="origin"></code></p>
-  <p>Current window.name:</p>
-  <pre id="value"></pre>
+  <h2>Chromium window.name Persistence PoC</h2>
 
-  <button id="set">1. Set marker</button>
-  <button id="navigate">2. Navigate cross-site</button>
-  <button id="refresh">3. Reload this page</button>
-  <button id="clear">Clear marker</button>
+  <p><b>Destination URL:</b></p>
+  <pre id="url"></pre>
 
-  <h3>Navigation log</h3>
-  <pre id="log"></pre>
+  <p><b>Received window.name:</b></p>
+  <pre id="name"></pre>
+
+  <p><b>Result:</b></p>
+  <pre id="result"></pre>
+
+  <p><b>Page lifecycle:</b></p>
+  <pre id="lifecycle"></pre>
+
+  <button id="refresh">Reload destination</button>
+  <button id="clear">Clear window.name</button>
 
   <script>
-    const marker = "BB-POC-92741";
-    const destination = "https://test-website-b.pages.dev/";
-    const logKey = "window-name-poc-log";
-
-    function snapshot(event) {
-      const record = {
-        time: new Date().toISOString(),
-        event,
-        href: location.href,
-        origin: location.origin,
-        windowName: window.name,
-        visibility: document.visibilityState
-      };
-
-      let entries = [];
-      try {
-        entries = JSON.parse(sessionStorage.getItem(logKey) || "[]");
-      } catch (_) {}
-
-      entries.push(record);
-      try {
-        sessionStorage.setItem(logKey, JSON.stringify(entries));
-      } catch (_) {}
-
-      render();
-    }
+    const expectedMarker = "BB-POC-92741";
+    const lifecycle = [];
 
     function render() {
-      document.getElementById("origin").textContent = location.origin;
-      document.getElementById("value").textContent =
-        JSON.stringify({ windowName: window.name }, null, 2);
+      const value = window.name;
 
-      let entries = [];
-      try {
-        entries = JSON.parse(sessionStorage.getItem(logKey) || "[]");
-      } catch (_) {}
+      document.getElementById("url").textContent =
+        location.href;
 
-      document.getElementById("log").textContent =
-        JSON.stringify(entries, null, 2);
+      document.getElementById("name").textContent =
+        JSON.stringify(value);
+
+      document.getElementById("result").textContent =
+        value === expectedMarker
+          ? "MARKER PERSISTED: expected marker received"
+          : value === ""
+            ? "window.name is empty"
+            : "A different window.name value was received";
+
+      document.getElementById("lifecycle").textContent =
+        lifecycle.join("\n");
     }
 
-    document.getElementById("set").onclick = () => {
-      window.name = marker;
-      snapshot("marker-set");
-    };
-
-    document.getElementById("navigate").onclick = () => {
-      snapshot("before-cross-site-navigation");
-      location.href = destination;
-    };
+    function record(event) {
+      lifecycle.push(
+        new Date().toISOString() + " | " + event +
+        " | window.name=" + JSON.stringify(window.name)
+      );
+      render();
+    }
 
     document.getElementById("refresh").onclick = () => {
       location.reload();
@@ -98,15 +81,15 @@
 
     document.getElementById("clear").onclick = () => {
       window.name = "";
-      snapshot("marker-cleared");
+      record("Manually cleared");
     };
 
     window.addEventListener("pageshow", event => {
-      snapshot("pageshow; persisted=" + event.persisted);
+      record("pageshow; persisted=" + event.persisted);
     });
 
     window.addEventListener("pagehide", event => {
-      snapshot("pagehide; persisted=" + event.persisted);
+      record("pagehide; persisted=" + event.persisted);
     });
 
     render();
