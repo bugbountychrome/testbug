@@ -1,19 +1,115 @@
+
 <!doctype html>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<h3>GitHub Pages — window.name History Test</h3>
-<pre id="out">Memeriksa...</pre>
-<script>
-function report(eventName, persisted = '') {
-  document.getElementById('out').textContent +=
-    eventName + (persisted !== '' ? ' persisted=' + persisted : '') +
-    '\nwindow.name = ' + (window.name || '(kosong)') + '\n\n';
-}
-document.getElementById('out').textContent = '';
-window.addEventListener('pageshow', e => {
-  report('pageshow', e.persisted);
-});
-window.addEventListener('pagehide', e => {
-  report('pagehide', e.persisted);
-});
-report('script');
-</script>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>window.name Clearing Test</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 720px;
+      margin: 24px auto;
+      padding: 0 16px;
+      line-height: 1.5;
+    }
+    button {
+      padding: 12px;
+      margin: 4px 0;
+    }
+    pre {
+      padding: 12px;
+      background: #eee;
+      color: #111;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+<body>
+  <h2>window.name Clearing Test</h2>
+  <p>Origin: <code id="origin"></code></p>
+  <p>Current window.name:</p>
+  <pre id="value"></pre>
+
+  <button id="set">1. Set marker</button>
+  <button id="navigate">2. Navigate cross-site</button>
+  <button id="refresh">3. Reload this page</button>
+  <button id="clear">Clear marker</button>
+
+  <h3>Navigation log</h3>
+  <pre id="log"></pre>
+
+  <script>
+    const marker = "BB-POC-92741";
+    const destination = "https://test-website-b.pages.dev/";
+    const logKey = "window-name-poc-log";
+
+    function snapshot(event) {
+      const record = {
+        time: new Date().toISOString(),
+        event,
+        href: location.href,
+        origin: location.origin,
+        windowName: window.name,
+        visibility: document.visibilityState
+      };
+
+      let entries = [];
+      try {
+        entries = JSON.parse(sessionStorage.getItem(logKey) || "[]");
+      } catch (_) {}
+
+      entries.push(record);
+      try {
+        sessionStorage.setItem(logKey, JSON.stringify(entries));
+      } catch (_) {}
+
+      render();
+    }
+
+    function render() {
+      document.getElementById("origin").textContent = location.origin;
+      document.getElementById("value").textContent =
+        JSON.stringify({ windowName: window.name }, null, 2);
+
+      let entries = [];
+      try {
+        entries = JSON.parse(sessionStorage.getItem(logKey) || "[]");
+      } catch (_) {}
+
+      document.getElementById("log").textContent =
+        JSON.stringify(entries, null, 2);
+    }
+
+    document.getElementById("set").onclick = () => {
+      window.name = marker;
+      snapshot("marker-set");
+    };
+
+    document.getElementById("navigate").onclick = () => {
+      snapshot("before-cross-site-navigation");
+      location.href = destination;
+    };
+
+    document.getElementById("refresh").onclick = () => {
+      location.reload();
+    };
+
+    document.getElementById("clear").onclick = () => {
+      window.name = "";
+      snapshot("marker-cleared");
+    };
+
+    window.addEventListener("pageshow", event => {
+      snapshot("pageshow; persisted=" + event.persisted);
+    });
+
+    window.addEventListener("pagehide", event => {
+      snapshot("pagehide; persisted=" + event.persisted);
+    });
+
+    render();
+  </script>
+</body>
+</html>
