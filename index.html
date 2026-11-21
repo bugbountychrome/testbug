@@ -1,22 +1,67 @@
-
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Address Bar Test</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fullscreen Browser Demo</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#202124}
+.browser{height:100vh;display:flex;flex-direction:column}
+.toolbar{height:39px;min-height:39px;display:flex;align-items:center;gap:16px;padding:0 14px;border-bottom:1px solid #ddd;background:#fafafa}
+.nav{font-size:19px;color:#555}
+.address{height:29px;flex:1;min-width:0;border:1px solid #e1e3e6;border-radius:8px;background:#f0f1f3;display:flex;align-items:center;padding:0 12px;gap:9px}
+.url{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:10px;background:#fff0c9;color:#795400;padding:4px 7px;border-radius:4px;white-space:nowrap}
+.right{display:flex;gap:15px;color:#555}
+.content{flex:1;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{width:100%;max-width:424px;padding:40px;border:1px solid #dadce0;border-radius:12px;text-align:center}
+.brand{font-size:24px;font-weight:600;margin-bottom:27px}
+h1{font-size:24px;font-weight:400;margin:0 0 12px}
+.sub{font-size:14px;color:#5f6368;margin-bottom:28px}
+input{width:100%;height:52px;padding:0 13px;border:1px solid #dadce0;border-radius:5px;margin-bottom:16px;font-size:15px}
+.submit{width:100%;height:45px;background:#1a73e8;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer}
+.notice{font-size:11px;color:#8a5700;margin-top:22px}
+#start{position:fixed;inset:0;background:white;z-index:10;display:grid;place-items:center}
+#start button{background:#1a73e8;color:white;border:0;border-radius:7px;padding:14px 25px;font-size:15px;cursor:pointer}
+@media(max-width:500px){.card{padding:25px 18px;border:0}.toolbar{gap:9px;padding:0 8px}.right{gap:8px}.tag{font-size:8px}}
+</style>
 </head>
 <body>
-  <h1>Address Bar Spoofing Test</h1>
-  <button id="test">CLICK TO TEST</button>
-
-  <script>
-    document.getElementById("test").addEventListener("click", () => {
-      window.location.href = "https://google.com/";
-
-      const end = performance.now() + 120000;
-      while (performance.now() < end) {}
-    });
-  </script>
+<div id="start"><button onclick="launch()">Open To Login</button></div>
+<div class="browser">
+ <header class="toolbar">
+  <span class="nav">◫</span><span class="nav">←</span><span class="nav">→</span><span class="nav">⟳</span>
+  <div class="address">
+   <span></span>
+   <span class="url">accounts.google.com</span>
+   <span class="tag">Google Login</span>
+  </div>
+  <div class="right"><span>☆</span><span>⋯</span></div>
+ </header>
+ <main class="content">
+  <section class="card">
+   <div class="brand">Sign In To Google Accounts</div>
+   <h1>Sign in</h1>
+   <div class="sub">Browser fullscreen security demonstration.</div>
+   <form id="demoForm">
+    <input type="email" placeholder="Email address" autocomplete="off" required>
+    <input type="password" placeholder="Password" autocomplete="off" required>
+    <button class="submit">Continue</button>
+   </form>
+   <div class="notice">SIMULATION ONLY · No credentials collected</div>
+  </section>
+ </main>
+</div>
+<script>
+async function launch(){
+ try{await document.documentElement.requestFullscreen()}catch(e){}
+ document.getElementById('start').style.display='none';
+}
+document.getElementById('demoForm').addEventListener('submit',e=>{
+ e.preventDefault();e.target.reset();
+ alert('Demo completed. No data transmitted.');
+});
+</script>
 </body>
 </html>
