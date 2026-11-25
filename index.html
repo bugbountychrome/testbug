@@ -1,132 +1,67 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Opera GX Address Bar Research</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fullscreen Browser Demo</title>
 <style>
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: #101014;
-  color: white;
-  font-family: Arial, sans-serif;
-  padding: 25px;
-}
-
-.container {
-  max-width: 420px;
-  margin: 50px auto;
-  background: #1c1c24;
-  padding: 25px;
-  border-radius: 14px;
-}
-
-h2 {
-  color: #fa315b;
-}
-
-input, button {
-  width: 100%;
-  padding: 14px;
-  margin-top: 12px;
-  border-radius: 7px;
-  border: none;
-}
-
-input {
-  background: #292933;
-  color: white;
-}
-
-button {
-  background: #fa315b;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.result {
-  margin-top: 20px;
-  padding: 12px;
-  background: #292933;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#202124}
+.browser{height:100vh;display:flex;flex-direction:column}
+.toolbar{height:39px;min-height:39px;display:flex;align-items:center;gap:16px;padding:0 14px;border-bottom:1px solid #ddd;background:#fafafa}
+.nav{font-size:19px;color:#555}
+.address{height:29px;flex:1;min-width:0;border:1px solid #e1e3e6;border-radius:8px;background:#f0f1f3;display:flex;align-items:center;padding:0 12px;gap:9px}
+.url{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:10px;background:#fff0c9;color:#795400;padding:4px 7px;border-radius:4px;white-space:nowrap}
+.right{display:flex;gap:15px;color:#555}
+.content{flex:1;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{width:100%;max-width:424px;padding:40px;border:1px solid #dadce0;border-radius:12px;text-align:center}
+.brand{font-size:24px;font-weight:600;margin-bottom:27px}
+h1{font-size:24px;font-weight:400;margin:0 0 12px}
+.sub{font-size:14px;color:#5f6368;margin-bottom:28px}
+input{width:100%;height:52px;padding:0 13px;border:1px solid #dadce0;border-radius:5px;margin-bottom:16px;font-size:15px}
+.submit{width:100%;height:45px;background:#1a73e8;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer}
+.notice{font-size:11px;color:#8a5700;margin-top:22px}
+#start{position:fixed;inset:0;background:white;z-index:10;display:grid;place-items:center}
+#start button{background:#1a73e8;color:white;border:0;border-radius:7px;padding:14px 25px;font-size:15px;cursor:pointer}
+@media(max-width:500px){.card{padding:25px 18px;border:0}.toolbar{gap:9px;padding:0 8px}.right{gap:8px}.tag{font-size:8px}}
 </style>
 </head>
-
 <body>
-
-<div class="container">
-
-<h2>Opera GX Security Research</h2>
-<p>Address Bar Userinfo + One Click Login</p>
-
-<form id="loginForm">
-
-<input
-  type="text"
-  id="username"
-  value="researcher@example.test"
-  autocomplete="off"
-  placeholder="Test username"
->
-
-<input
-  type="password"
-  id="password"
-  value="DUMMY-ONLY-123"
-  autocomplete="off"
-  placeholder="Dummy password"
->
-
-<button type="submit">
-  Continue / Login
-</button>
-
-</form>
-
-<div class="result" id="result">
-Waiting for interaction...
+<div id="start"><button onclick="launch()">Open To Login</button></div>
+<div class="browser">
+ <header class="toolbar">
+  <span class="nav">◫</span><span class="nav">←</span><span class="nav">→</span><span class="nav">⟳</span>
+  <div class="address">
+   <span></span>
+   <span class="url">accounts.google.com</span>
+   <span class="tag">Google Login</span>
+  </div>
+  <div class="right"><span>☆</span><span>⋯</span></div>
+ </header>
+ <main class="content">
+  <section class="card">
+   <div class="brand">Sign In To Google Accounts</div>
+   <h1>Sign in</h1>
+   <div class="sub">Browser fullscreen security demonstration.</div>
+   <form id="demoForm">
+    <input type="email" placeholder="Email address" autocomplete="off" required>
+    <input type="password" placeholder="Password" autocomplete="off" required>
+    <button class="submit">Continue</button>
+   </form>
+   <div class="notice">SIMULATION ONLY · No credentials collected</div>
+  </section>
+ </main>
 </div>
-
-</div>
-
 <script>
-const form = document.getElementById("loginForm");
-const result = document.getElementById("result");
-
-form.addEventListener("submit", function(event) {
-  event.preventDefault();
-
-  const username = document.getElementById("username").value;
-
-  result.innerHTML = `
-    <strong>FORM SUBMITTED</strong><br><br>
-    Username: ${escapeHTML(username)}<br>
-    Password: [REDACTED]<br><br>
-    Current URL: ${escapeHTML(location.href)}<br>
-    Origin: ${escapeHTML(location.origin)}<br>
-    Hostname: ${escapeHTML(location.hostname)}
-  `;
-});
-
-function escapeHTML(value) {
-  return String(value).replace(/[&<>"']/g, char => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
-  })[char]);
+async function launch(){
+ try{await document.documentElement.requestFullscreen()}catch(e){}
+ document.getElementById('start').style.display='none';
 }
+document.getElementById('demoForm').addEventListener('submit',e=>{
+ e.preventDefault();e.target.reset();
+ alert('Demo completed. No data transmitted.');
+});
 </script>
-
 </body>
 </html>
